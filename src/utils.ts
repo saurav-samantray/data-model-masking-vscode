@@ -82,18 +82,35 @@ export function getOutputPath(
  * Writes the generated schema to a file, creating directories if needed.
  */
 export function writeSchemaFile(filePath: string, schema: Schema): void {
+    const suffix = '.m1'; // Define the suffix to add
     try {
+        // 1. Separate directory, base filename, and extension
         const dir = path.dirname(filePath);
+        const ext = path.extname(filePath); // e.g., ".json"
+        const baseName = path.basename(filePath, ext); // e.g., "schema"
+
+        // 2. Construct the new filename with the suffix
+        const newFileName = `${baseName}${suffix}${ext}`; // e.g., "schema_masked.json"
+        const newFilePath = path.join(dir, newFileName); // Construct the full new path
+
+        // 3. Ensure the directory exists (using the original directory path)
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
-        // Output as JSON for consistency
+
+        // 4. Stringify the schema content
         const content = JSON.stringify(schema, null, 2);
-        fs.writeFileSync(filePath, content, 'utf-8');
-        console.log(`Successfully wrote schema to: ${filePath}`);
+
+        // 5. Write the file using the NEW path
+        fs.writeFileSync(newFilePath, content, 'utf-8');
+        console.log(`Successfully wrote masked schema to: ${newFilePath}`); // Log the new path
+
     } catch (error: any) {
-        console.error(`Error writing schema file ${filePath}: ${error.message}`);
-        throw error;
+        // Log error with the intended original path for context, maybe? Or new path?
+        // Let's use newFilePath as that's where the write failed.
+        const newFilePathForError = path.join(path.dirname(filePath), `${path.basename(filePath, path.extname(filePath))}${suffix}${path.extname(filePath)}`);
+        console.error(`Error writing masked schema file ${newFilePathForError}: ${error.message}`);
+        throw error; // Re-throw to propagate the error
     }
 }
 

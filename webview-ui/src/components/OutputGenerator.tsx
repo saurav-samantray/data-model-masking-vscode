@@ -1,13 +1,14 @@
 // src/components/OutputGenerator.tsx
 import React from 'react';
 import { SelectionState } from '../types';
+import { Button } from '@mui/material';
 
 interface OutputGeneratorProps {
   selectionState: SelectionState | undefined;
   mainSchemaFileName: string | null; // Changed to potentially null
   mainSchemaBasePath: string | null;
   outputDir: string;
-  handleCreateMask: (selectionPayload: String) => void;
+  handleCreateMask: (selectionPayload: string) => void;
 }
 
 const OutputGenerator: React.FC<OutputGeneratorProps> = ({ selectionState, mainSchemaFileName, mainSchemaBasePath, outputDir, handleCreateMask }) => {
@@ -18,8 +19,8 @@ const OutputGenerator: React.FC<OutputGeneratorProps> = ({ selectionState, mainS
       return;
     }
     if (!mainSchemaFileName) {
-        alert("Cannot generate output: Main schema ID is missing.");
-        return;
+      alert("Cannot generate output: Main schema ID is missing.");
+      return;
     }
 
     // Construct the final output object structure
@@ -47,9 +48,13 @@ const OutputGenerator: React.FC<OutputGeneratorProps> = ({ selectionState, mainS
 
   return (
     <div style={{ marginTop: '20px', borderTop: '1px solid #ccc', paddingTop: '10px' }}>
-      <button onClick={generateOutputFile} disabled={!selectionState || !mainSchemaFileName}>
-        Generate Mask
-      </button>
+      <Button
+        variant="contained"
+        size="medium" // Match TextField height better
+        onClick={generateOutputFile}
+        disabled={!selectionState || !mainSchemaFileName}
+        sx={{ flexShrink: 0 }} // Prevent button from shrinking
+      >Generate Mask</Button>
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { generatePayload, getUri } from './utils';
+import { generatePayload, getThemeName, getUri } from './utils';
 import * as yaml from 'js-yaml';
 import { generateMask } from './processor';
 
@@ -14,10 +14,10 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('data-model-masking.openSchemaFile', (uri: vscode.Uri) => {
       if (uri) {
-        createOrShow(context.extensionUri, uri.fsPath);
+        createOrShow(context, uri.fsPath);
       } else {
         if (vscode.window.activeTextEditor) {
-          createOrShow(context.extensionUri, vscode.window.activeTextEditor.document.uri.fsPath);
+          createOrShow(context, vscode.window.activeTextEditor.document.uri.fsPath);
         }
       }
     })
@@ -40,77 +40,106 @@ export function activate(context: vscode.ExtensionContext) {
   // });
 
   // to manage the change in theme and update the custom preview's theme dynamically
-  context.subscriptions.push(
-    vscode.window.onDidChangeActiveColorTheme(colorTheme => {
-      console.log(`Theme changed: ${JSON.stringify(colorTheme)}`);
-      let theme = 'light';
-      if ([2, 3].includes(colorTheme.kind)) {
-        theme = 'dark';
-      }
-      if (currentPanel) {
-        currentPanel?.webview.postMessage({ type: 'theme', data: theme });
-      }
-    })
-  );
+  // Listen for theme changes and inform the webview
+  context.subscriptions.push(vscode.window.onDidChangeActiveColorTheme(e => {
+    if (currentPanel) {
+      const newTheme = getThemeName(e.kind);
+      console.log(`Theme changed, sending new theme to webview: ${newTheme}`);
+      currentPanel.webview.postMessage({ type: 'setTheme', theme: newTheme });
+    }
+  }));
 }
 
-async function createOrShow(extensionUri: vscode.Uri, filePath: string) {
-  console.log(`createOrShow() called with filePath: ${filePath} and extensionUri: ${extensionUri}`);
-  console.log(`current color theme: ${vscode.workspace.getConfiguration().get("workbench.colorTheme")}`);
-
+function createOrShow(context: vscode.ExtensionContext, filePath: string) {
+  const extensionUri = context.extensionUri; // Get extensionUri from context
   const column = vscode.window.activeTextEditor
     ? vscode.window.activeTextEditor.viewColumn
     : undefined;
 
-  if (currentPanel) {
-    console.log(`currentPanel present: ${currentPanel}`);
-    currentPanel.title = path.basename(filePath);
-    //currentPanel.reveal(column);
-  } else {
-    console.log(`Creating new currentPanel`);
-    currentPanel = vscode.window.createWebviewPanel(
-      'json-schema-viewer',
-      path.basename(filePath),
-      vscode.ViewColumn.Active,
-      {
-        enableScripts: true,
-        localResourceRoots: [extensionUri],
-      }
-    );
 
-    currentPanel.onDidDispose(
-      () => {
-        currentPanel = undefined;
-      },
-      null,
-      []
-    );
+  // If we already have a panel, show it.
+  if (currentPanel) {
+    // If the file path is different, update the content
+    if (currentFilePath !== filePath) {
+      currentFilePath = filePath;
+      // Post a message to the webview to clear existing state before loading new data
+      currentPanel.webview.postMessage({ type: 'clearState' });
+      // Send new payload (handle potential errors)
+      generatePayload(filePath)
+        .then(dataModelPayload => {
+          const currentTheme = getThemeName(vscode.window.activeColorTheme.kind); // Get theme again
+          currentPanel?.webview.postMessage({ type: 'dataModelPayload', data: dataModelPayload, theme: currentTheme }); // Send theme with payload
+        })
+        .catch(error => {
+          console.error('Error generating dataModelPayload for existing panel:', error);
+          vscode.window.showErrorMessage(`Error loading schema: ${error.message}`);
+          currentPanel?.webview.postMessage({ type: 'dataModelPayload', data: null }); // Send null on error
+        });
+    }
+    currentPanel.reveal(column);
+    return;
   }
+
+  // Otherwise, create a new panel.
+  currentFilePath = filePath; // Store the path for the new panel
+  const panel = vscode.window.createWebviewPanel(
+    'dataModelMasking', // Identifies the type of the webview. Used internally
+    `Mask Editor: ${path.basename(filePath)}`, // Title of the panel displayed to the user
+    column || vscode.ViewColumn.One, // Editor column to show the new webview panel in.
+    {
+      enableScripts: true, // Enable javascript in the webview
+      localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'webview-ui', 'build')] // Restrict the webview to only loading content from our extension's `dist` directory.
+    }
+  );
+  currentPanel = panel; // Store reference
+
+  panel.webview.html = getHtmlForWebview(panel.webview, extensionUri);
+
+
   console.log(`Setting html for webview. extensionUri: ${extensionUri}`);
-  const theme = await getCurrentTheme();
-  currentPanel.webview.html = getHtmlForWebview(currentPanel.webview, extensionUri, filePath, theme);
+  //currentPanel.webview.html = getHtmlForWebview(currentPanel.webview, extensionUri);
   //console.log(`Response from getHtmlForWebview() method: ${currentPanel.webview.html}`);
 
   //Don't need the below message as WebView cannot access file with the filePath. Have to send the complete content
   //currentPanel.webview.postMessage({ type: 'openFile', data: filePath });
 
-  currentPanel.webview.onDidReceiveMessage(async (data) => {
+  // Handle messages from the webview
+  panel.webview.onDidReceiveMessage(async (data) => {
     console.log(`Recieved message in extension host: ${JSON.stringify(data)}`);
     switch (data.type) {
       case 'ready': {
-        console.log(`Webview is ready! : currentPanel : ${JSON.stringify(currentPanel)}`);
+        console.log(`Webview is ready! Sending initial payload for: ${currentFilePath}`);
+        if (!currentFilePath) {
+          console.error("Cannot send dataModelPayload: currentFilePath is missing.");
+          currentPanel?.webview.postMessage({ type: 'dataModelPayload', data: null });
+          return;
+        }
         try {
-          //parse the content to dereference
-          const dataModelPayload = await generatePayload(filePath);
-          currentPanel?.webview.postMessage({ type: 'dataModelPayload', data: dataModelPayload, theme: theme });
-        } catch (error) {
-          console.error('Error parsing dataModelPayload:', error);
+          const dataModelPayload = await generatePayload(currentFilePath);
+          const currentTheme = getThemeName(vscode.window.activeColorTheme.kind); // Get current theme
+          console.log(`Sending initial theme: ${currentTheme}`);
+          // Send theme *first*, then payload
+          currentPanel?.webview.postMessage({ type: 'setTheme', theme: currentTheme });
+          currentPanel?.webview.postMessage({ type: 'dataModelPayload', data: dataModelPayload });
+        } catch (error: any) {
+          console.error('Error generating dataModelPayload:', error);
+          vscode.window.showErrorMessage(`Error loading schema: ${error.message}`);
           currentPanel?.webview.postMessage({ type: 'dataModelPayload', data: null });
         }
         break;
       }
       case 'create-mask': {
         console.log(`Create Mask Message Recieved: ${JSON.stringify(data)}`);
+        if (!currentFilePath) { // Ensure we still have the context file path
+          console.error("Cannot create mask: Original file path context is missing.");
+          vscode.window.showErrorMessage("Cannot create mask: Original file path context is missing.");
+          return;
+        }
+        if (!data || typeof data.content !== 'string') {
+          console.error("Cannot create mask: Invalid or missing selection content received.");
+          vscode.window.showErrorMessage("Cannot create mask: Invalid or missing selection content received.");
+          return;
+        }
         try {
           //parse the content to dereference
           const workspaceBasePath = vscode.workspace.rootPath || "";
@@ -121,11 +150,46 @@ async function createOrShow(extensionUri: vscode.Uri, filePath: string) {
         }
         break;
       }
+      // --- THIS CASE SHOULD HANDLE THE MESSAGE ---
+      case 'selectOutputDirectory': {
+        console.log("Received request to select output directory.");
+        try {
+            const options: vscode.OpenDialogOptions = {
+                canSelectMany: false,
+                canSelectFiles: false,
+                canSelectFolders: true,
+                openLabel: 'Select Output Folder',
+                // Optionally set a default URI based on workspace or current file
+                // defaultUri: vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders[0].uri : undefined
+            };
+
+            const result = await vscode.window.showOpenDialog(options);
+
+            if (result && result.length > 0) {
+                const selectedFolderPath = result[0].fsPath;
+                console.log(`Folder selected: ${selectedFolderPath}`);
+                // Send the selected path back to the webview
+                panel?.webview.postMessage({ type: 'setOutputDirectory', path: selectedFolderPath });
+            } else {
+                console.log("Folder selection cancelled by user.");
+            }
+        } catch (error: any) {
+            console.error('Error showing open dialog:', error);
+            vscode.window.showErrorMessage(`Error selecting folder: ${error.message}`);
+        }
+        break; // Make sure break is here
+    }
+    // --- END OF HANDLER ---
       default:
-        console.log(`Recieved message in extension host: ${JSON.stringify(data)}`);
+        console.log(`Received unhandled message type: ${data.type}`);
         break;
     }
   });
+  // Handle panel disposal
+  panel.onDidDispose(() => {
+    currentPanel = undefined;
+    currentFilePath = undefined; // Clear path on dispose
+  }, null, context.subscriptions); // Use context.subscriptions for disposal management
 }
 
 /**
@@ -134,15 +198,15 @@ async function createOrShow(extensionUri: vscode.Uri, filePath: string) {
  * @returns 
  * 
  */
-async function getCurrentTheme(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let theme = 'light';
-    if ((vscode.workspace.getConfiguration().get("workbench.colorTheme") as string)?.toLowerCase().includes('dark')) {
-      theme = 'dark';
-    }
-    resolve(theme);
-  });
-}
+// async function getCurrentTheme(): Promise<string> {
+//   return new Promise((resolve, reject) => {
+//     let theme = 'light';
+//     if ((vscode.workspace.getConfiguration().get("workbench.colorTheme") as string)?.toLowerCase().includes('dark')) {
+//       theme = 'dark';
+//     }
+//     resolve(theme);
+//   });
+// }
 
 /**
  * 
@@ -152,9 +216,9 @@ async function getCurrentTheme(): Promise<string> {
  * @param theme 
  * @returns 
  */
-function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri, filePath: string, theme: string) {
+function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {
   console.log(`getHtmlForWebview() method`);
-  const { scriptUri, styleUri } = getDistFileUris(webview, extensionUri, theme);
+  const { scriptUri, styleUri } = getDistFileUris(webview, extensionUri);
   console.log(`scriptUri: ${scriptUri}`);
   console.log(`styleUri: ${styleUri}`);
   //console.log(`styleThemeUri: ${styleThemeUri}`);
@@ -176,7 +240,7 @@ function getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri, fi
   `;
 }
 
-function getDistFileUris(webview: vscode.Webview, extensionUri: vscode.Uri, theme: string = 'light') {
+function getDistFileUris(webview: vscode.Webview, extensionUri: vscode.Uri) {
   const scriptDistPath = path.join(extensionUri.fsPath, 'webview-ui', 'build', 'static', 'js');
   const scriptFiles = fs.readdirSync(scriptDistPath);
   const styleDistPath = path.join(extensionUri.fsPath, 'webview-ui', 'build', 'static', 'css');

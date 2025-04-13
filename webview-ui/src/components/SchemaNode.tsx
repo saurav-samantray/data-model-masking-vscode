@@ -43,7 +43,15 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
     };
 
     return (
-      <Box sx={{ ml: isRoot ? 0 : 2.5, pl: isRoot ? 0 : 1.25, borderLeft: isRoot ? 'none' : '1px solid #eee' }}>
+      <Box sx={{
+        // Use theme spacing and CSS variable for border
+        marginLeft: isRoot ? 0 : theme => theme.spacing(2.5),
+        paddingLeft: isRoot ? 0 : theme => theme.spacing(1.25),
+        borderLeft: isRoot ? 'none' : '1px solid var(--border-color-light)', // Use CSS variable
+        paddingTop: theme => theme.spacing(0.5),
+        paddingBottom: theme => theme.spacing(0.5),
+     }}
+      >
         <FormControlLabel
           control={
             <Checkbox
@@ -216,9 +224,10 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
         {/* 1. Render Resolved $ref Content */}
         {hasRefTargetSelection && resolvedRefSchema && resolvedRefId && !isCircularOrRepeatedRef && (
           <Box sx={{
-              borderLeft: theme => `2px dotted ${theme.palette.info.light}`,
+              // Use CSS variable for dotted border
+              borderLeft: theme => `2px dotted var(--ref-border-color)`,
               pl: theme => theme.spacing(1.25),
-              ml: theme => theme.spacing(-1.5), // Adjust for visual alignment with parent checkbox
+              ml: theme => theme.spacing(-1.5),
               mt: theme => theme.spacing(0.5)
             }}>
             <SchemaNode

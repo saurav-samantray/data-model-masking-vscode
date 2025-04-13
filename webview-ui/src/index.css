@@ -1,13 +1,137 @@
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+/* src/index.css */
+
+/* Define light theme variables */
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light; /* Inform browser about the default scheme */
+  --background-color: #ffffff;
+  --text-color: #213547;
+  --text-color-secondary: #5f6368;
+  --border-color: #e0e0e0;
+  --border-color-light: #eee; /* For lighter borders like in SchemaNode */
+  --link-color: #1a73e8;
+  --button-background: #f8f9fa;
+  --button-text: #3c4043;
+  --button-hover-background: #f1f3f4;
+  --button-disabled-background: #f1f3f4;
+  --button-disabled-text: #9aa0a6;
+  --paper-background: #ffffff; /* Background for Paper components */
+  --tooltip-background: rgba(97, 97, 97, 0.92); /* MUI default darkish tooltip */
+  --tooltip-text: #ffffff;
+  --checkbox-color: #1976d2; /* MUI default primary */
+  --error-color: #d32f2f; /* MUI default error */
+  --warning-color: #ed6c02; /* MUI default warning */
+  --info-color: #0288d1; /* MUI default info */
+  --ref-border-color: #90caf9; /* Light blue for ref border */
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+/* Define dark theme overrides */
+body.dark {
+  color-scheme: dark; /* Inform browser about the dark scheme */
+  --background-color: #1e1e1e; /* VS Code dark background */
+  --text-color: #cccccc; /* VS Code dark text */
+  --text-color-secondary: #888888;
+  --border-color: #3c3c3c;
+  --border-color-light: #333; /* Darker border for SchemaNode */
+  --link-color: #4dabf7;
+  --button-background: #3c3c3c;
+  --button-text: #cccccc;
+  --button-hover-background: #4a4a4a;
+  --button-disabled-background: #3c3c3c;
+  --button-disabled-text: #666666;
+  --paper-background: #252526; /* Darker paper */
+  --tooltip-background: rgba(230, 230, 230, 0.9); /* Lighter tooltip for dark */
+  --tooltip-text: #1e1e1e;
+  --checkbox-color: #90caf9; /* Lighter blue for dark */
+  --error-color: #f44336; /* Brighter red */
+  --warning-color: #ffa726; /* Brighter orange */
+  --info-color: #29b6f6; /* Brighter blue */
+  --ref-border-color: #1e63a3; /* Darker blue for ref border */
+}
+
+/* Apply base styles using variables */
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--background-color);
+  color: var(--text-color);
+  transition: background-color 0.2s ease, color 0.2s ease; /* Smooth transition */
+}
+
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  /* padding: 2rem; */ /* Padding is now handled by App's Box */
+  text-align: center;
+  width: 100%;
+  height: 100vh; /* Ensure root takes full height */
+}
+
+
+/* Update component styles to use variables */
+/* Example for OutputGenerator button (if not using MUI Button) */
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: var(--button-background);
+  color: var(--button-text);
+  cursor: pointer;
+  transition: border-color 0.25s, background-color 0.2s;
+}
+button:hover {
+  border-color: var(--link-color);
+  background-color: var(--button-hover-background);
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color; /* Keep default focus */
+}
+button:disabled {
+    background-color: var(--button-disabled-background);
+    color: var(--button-disabled-text);
+    cursor: not-allowed;
+    border-color: transparent;
+}
+
+/* Ensure links use variable */
+a {
+  font-weight: 500;
+  color: var(--link-color);
+  text-decoration: inherit;
+}
+a:hover {
+  /* Add hover effect if desired */
+}
+
+/* Update SchemaNode specific styles if needed (border color) */
+/* (SchemaNode.tsx already uses theme spacing, MUI components will adapt) */
+/* Example if you had custom borders not handled by MUI */
+/* .some-schema-node-class {
+  border-left: 1px solid var(--border-color-light);
+} */
+
+/* Update PreviewPanel styles if needed */
+/* pre {
+  background-color: var(--paper-background); // Handled by Paper now
+  color: var(--text-color);
+} */
+
+/* Ensure MUI components inherit font */
+body, button, input, textarea, select {
+    font-family: inherit;
 }
