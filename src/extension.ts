@@ -144,7 +144,7 @@ function createOrShow(context: vscode.ExtensionContext, filePath: string) {
           //parse the content to dereference
           const workspaceBasePath = vscode.workspace.rootPath || "";
           console.log(`workspaceBasePath: ${workspaceBasePath}`);
-          await generateMask(workspaceBasePath, data?.content);
+          await generateMask(data.content, currentFilePath);
         } catch (error) {
           console.error('Error creating masks', error);
         }

@@ -1,12 +1,15 @@
+// src/processor.ts
 import fs from 'fs';
 import path from 'path';
-import { Schema as SchemaType, Schema, SelectionValue, RootSelection } from './types';
+import * as vscode from 'vscode'; // Import vscode for showing messages/using workspace functions
+import { Schema as SchemaType, Schema, SelectionValue, RootSelection, SelectionDetail } from './types'; // Import SelectionDetail
 import { loadSchemaFile, resolveRefPath, getOutputPath, writeSchemaFile } from './utils';
 
 export const PROCESSING_MARKER = { __processing_marker__: true };
 
 // --- Configuration ---
 const DEFAULT_OUTPUT_DIR = './output_schemas';
+const SELECTION_FILE_SUFFIX = '.config.json'; // Suffix for the selection file
 
 interface ProcessingCache {
     [originalAbsolutePath: string]: {
@@ -56,6 +59,7 @@ export function processSchema(
     // Base case: If selection is explicitly false or undefined, ignore.
     if (!selection) {
         if (isTopLevelCall) {
+            // If it was marked as processing, remove the marker since it resulted in null
             delete processedCache[originalSchemaPath];
             console.log(`Finished processing (top-level, no selection): ${originalSchemaPath}`);
         } else {
@@ -134,14 +138,26 @@ export function processSchema(
                 processedRefSchemaResult = null;
             }
 
+            // If the ref processing resulted in something (even a marker), create the $ref link in the output
             if (processedRefSchemaResult === PROCESSING_MARKER || (processedRefSchemaResult && Object.keys(processedRefSchemaResult).length > 0)) {
                 const currentOutputSchemaPath = getOutputPath(originalSchemaPath, baseInputDir, baseOutputDir);
                 const refOutputPath = getOutputPath(refAbsolutePath, baseInputDir, baseOutputDir);
+
+                // --- Calculate relative path for $ref ---
                 let refOutputRelativePath = path.relative(path.dirname(currentOutputSchemaPath), refOutputPath);
                 refOutputRelativePath = refOutputRelativePath.replace(/\\/g, '/');
+
+                // Add suffix to the filename part of the relative path
+                const refDir = path.dirname(refOutputRelativePath);
+                const refExt = path.extname(refOutputRelativePath);
+                const refBaseName = path.basename(refOutputRelativePath, refExt);
+                const maskedRefFileName = `${refBaseName}_m1${refExt}`; // Add suffix here
+                refOutputRelativePath = path.join(refDir, maskedRefFileName).replace(/\\/g, '/'); // Reconstruct with suffix
+
                  if (!refOutputRelativePath.startsWith('.') && !refOutputRelativePath.startsWith('/')) {
                     refOutputRelativePath = './' + refOutputRelativePath;
                  }
+                // --- End relative path calculation ---
 
                 // Clear any basic keywords copied earlier and just use the $ref
                 Object.keys(outputSchema).forEach(key => delete outputSchema[key]);
@@ -161,25 +177,12 @@ export function processSchema(
                  hasSelectedContent = true;
              }
         }
-
-        // --- Store result and return (after $ref handling) ---
-        // This block was slightly misplaced before, should be outside the $ref check
-        // if (isTopLevelCall) {
-        //     const finalResultSchema = hasSelectedContent ? outputSchema : null;
-        //     processedCache[originalSchemaPath] = { outputSchema: finalResultSchema };
-        //     console.log(`Finished processing (top-level, with $ref logic): ${originalSchemaPath}`);
-        //     return finalResultSchema;
-        // } else {
-        //      console.log(`Finished processing (inline, with $ref logic) within: ${originalSchemaPath}`);
-        //     return hasSelectedContent ? outputSchema : null;
-        // }
-        // --> Moved final return/cache update to the end of the function
     } // End $ref handling
 
 
     // --- Handle properties (Objects) ---
-    // MODIFIED Condition: Process if selection is true OR if selection is an object with properties defined
-    if (originalSchema.properties && (selection === true || selection?.properties)) {
+    // Only process properties if there wasn't a $ref that took precedence
+    if (!outputSchema.$ref && originalSchema.properties && (selection === true || selection?.properties)) {
         const outputProperties: { [key: string]: SchemaType } = {};
         const outputRequired: string[] = [];
         let hasSelectedProperties = false;
@@ -214,6 +217,7 @@ export function processSchema(
                         }
                     } else if (processedPropSchemaResult === PROCESSING_MARKER) {
                         console.error(`DEV ERROR: PROCESSING_MARKER unexpectedly returned for property '${propKey}' in ${originalSchemaPath}. Check for nested $ref cycles.`);
+                        // Decide how to handle this - maybe add a placeholder or skip? Skipping for now.
                     } else {
                          console.log(`Property '${propKey}' in ${originalSchemaPath} processed to null/empty.`);
                     }
@@ -230,16 +234,15 @@ export function processSchema(
                 outputSchema.required = outputRequired;
             }
             hasSelectedContent = true; // We added properties
-        } else if (outputSchema.type === 'object' && Object.keys(outputSchema).length === 1 && !originalSchema.$ref) {
-             // Clean up 'type: object' if no properties were selected AND there wasn't a $ref handled above
-             // (If $ref was handled, it might have cleared outputSchema already)
+        } else if (outputSchema.type === 'object' && Object.keys(outputSchema).length === 1) {
+             // Clean up 'type: object' if no properties were selected
              delete outputSchema.type;
         }
     }
 
     // --- Handle items (Arrays) ---
-    // MODIFIED Condition: Process if selection is true OR if selection is an object with items defined
-    if (originalSchema.items && typeof originalSchema.items === 'object' && !Array.isArray(originalSchema.items) && (selection === true || selection?.items)) {
+    // Only process items if there wasn't a $ref that took precedence
+    if (!outputSchema.$ref && originalSchema.items && typeof originalSchema.items === 'object' && !Array.isArray(originalSchema.items) && (selection === true || selection?.items)) {
         // Determine the selection for items:
         // If main selection is true, select items (pass true down).
         // If main selection is an object, use the specific items selection from it.
@@ -263,8 +266,9 @@ export function processSchema(
                 hasSelectedContent = true; // We added items
             } else if (processedItemsSchemaResult === PROCESSING_MARKER) {
                  console.error(`DEV ERROR: PROCESSING_MARKER unexpectedly returned for items in ${originalSchemaPath}. Check for nested $ref cycles.`);
-            } else if (outputSchema.type === 'array' && Object.keys(outputSchema).length === 1 && !originalSchema.$ref) {
-                 // Clean up 'type: array' if no items resulted AND there wasn't a $ref handled above
+                 // Decide how to handle this - maybe add a placeholder or skip? Skipping for now.
+            } else if (outputSchema.type === 'array' && Object.keys(outputSchema).length === 1) {
+                 // Clean up 'type: array' if no items resulted
                  delete outputSchema.type;
             }
         } else {
@@ -277,8 +281,15 @@ export function processSchema(
     const finalResult = hasSelectedContent ? outputSchema : null;
 
     if (isTopLevelCall) {
-        processedCache[originalSchemaPath] = { outputSchema: finalResult };
-        console.log(`Finished processing (top-level): ${originalSchemaPath} -> ${finalResult ? 'Schema generated' : 'Result is null'}`);
+        // Only update the cache if the result is not the marker itself
+        // If it's the marker, it means we detected a cycle and returned early,
+        // the original marker placed at the start of the function should remain.
+        if (finalResult !== PROCESSING_MARKER) {
+            processedCache[originalSchemaPath] = { outputSchema: finalResult };
+            console.log(`Finished processing (top-level): ${originalSchemaPath} -> ${finalResult ? 'Schema generated' : 'Result is null'}`);
+        } else {
+            console.log(`Finished processing (top-level - cycle detected): ${originalSchemaPath} -> Returning marker`);
+        }
     } else {
          console.log(`Finished processing (inline): ${originalSchemaPath} -> ${finalResult ? 'Schema generated' : 'Result is null'}`);
     }
@@ -286,112 +297,173 @@ export function processSchema(
     return finalResult;
 }
 
+
 /**
- * 
- * Generating the mask
- * 
+ * Generates the masked schema and a selection file based on the selection definition.
+ * @param selectionJsonString The selection definition as a JSON string.
+ * @param originalContextFilePath The absolute path of the schema file the user was viewing.
  */
-export async function generateMask(workspaceBasePath: string, selection: string): Promise<void> {
-    // // 1. Read Selection Definition (Unchanged)
-    // const selectionFilePath = process.argv[2];
-    // if (!selectionFilePath) {
-    //   console.error("Usage: node dist/index.js <path_to_selection.json>");
-    //   process.exit(1);
-    // }
-    let rootSelection: RootSelection = JSON.parse(selection);
-    // try {
-    //   const selectionFileContent = fs.readFileSync(path.resolve(selectionFilePath), 'utf-8');
-    //   rootSelection = JSON.parse(selectionFileContent);
-    //   if (!rootSelection.mainSchemaId || typeof rootSelection.mainSchemaId !== 'string') {
-    //       throw new Error("Selection file must contain a 'mainSchemaId' (string).");
-    //   }
-    //    if (!rootSelection.selection || typeof rootSelection.selection !== 'object') {
-    //       throw new Error("Selection file must contain a 'selection' object.");
-    //   }
-    // } catch (error: any) {
-    //   console.error(`Error reading or parsing selection file ${selectionFilePath}: ${error.message}`);
-    //   process.exit(1);
-    // }
-  
-    // 2. Determine Paths (Unchanged)
-    const mainSchemaOriginalPath = path.resolve(rootSelection.mainSchemaBasePath, rootSelection.mainSchemaId);
-    const baseInputDir = rootSelection.mainSchemaBasePath;
-    const baseOutputDir = path.resolve(workspaceBasePath, rootSelection.outputDir || DEFAULT_OUTPUT_DIR);
-  
+export async function generateMask(selectionJsonString: string, originalContextFilePath: string): Promise<void> {
+    console.log(`generateMask called with context: ${originalContextFilePath}`);
+    console.log(`Received selection JSON string length: ${selectionJsonString.length}`);
+
+    // 1. Parse Selection Definition
+    let rootSelection: RootSelection;
+    try {
+        rootSelection = JSON.parse(selectionJsonString);
+        if (!rootSelection.mainSchemaId || typeof rootSelection.mainSchemaId !== 'string') {
+            throw new Error("Parsed selection must contain a 'mainSchemaId' (string).");
+        }
+        if (!rootSelection.selection || typeof rootSelection.selection !== 'object') {
+            throw new Error("Parsed selection must contain a 'selection' object.");
+        }
+        console.log("Successfully parsed selection JSON.");
+    } catch (error: any) {
+        console.error(`Error parsing selection JSON string: ${error.message}`);
+        throw new Error(`Invalid selection format: ${error.message}`);
+    }
+
+    // 2. Determine Paths
+    const originalContextDir = path.dirname(originalContextFilePath);
+    const mainSchemaOriginalPath = path.resolve(originalContextDir, rootSelection.mainSchemaId);
+    const baseInputDir = path.dirname(mainSchemaOriginalPath);
+
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    const workspaceRoot = workspaceFolders && workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : undefined;
+    let baseOutputDir: string;
+    const outputDirName = rootSelection.outputDir || DEFAULT_OUTPUT_DIR;
+
+    if (workspaceRoot) {
+        baseOutputDir = path.resolve(workspaceRoot, outputDirName);
+    } else {
+        console.warn("No workspace folder found. Output directory will be relative to the input schema's directory.");
+        baseOutputDir = path.resolve(baseInputDir, outputDirName);
+    }
+
     console.log(`Processing main schema: ${mainSchemaOriginalPath}`);
     console.log(`Using base input directory: ${baseInputDir}`);
     console.log(`Using base output directory: ${baseOutputDir}`);
-  
+
     // 3. Initialize Cache
-    const processedCache: ProcessingCache = {}; // Use the new cache type
-  
+    const processedCache: ProcessingCache = {};
+
     // 4. Load and Process Main Schema
     let mainProcessingResult: Schema | null | typeof PROCESSING_MARKER = null;
     try {
-      const mainSchema = loadSchemaFile(mainSchemaOriginalPath);
-  
-      // No need to pre-populate cache or handle main schema cache entry manually here.
-      // processSchema handles its own entry and updates.
-  
-      mainProcessingResult = processSchema(
-        mainSchema,
-        rootSelection.selection,
-        mainSchemaOriginalPath,
-        baseInputDir,
-        baseOutputDir,
-        processedCache // Pass the cache
-      );
-  
-      // The cache is now populated by all processSchema calls.
-  
+        if (!fs.existsSync(mainSchemaOriginalPath)) {
+             throw new Error(`Main schema file specified in selection ('${rootSelection.mainSchemaId}') not found at resolved path: ${mainSchemaOriginalPath}`);
+        }
+        const mainSchema = loadSchemaFile(mainSchemaOriginalPath);
+        mainProcessingResult = processSchema(
+            mainSchema,
+            rootSelection.selection,
+            mainSchemaOriginalPath,
+            baseInputDir,
+            baseOutputDir,
+            processedCache
+        );
     } catch (error: any) {
-      console.error(`Failed to process main schema: ${error.message}`);
-      if (error.stack) console.error(error.stack); // Log stack for better debugging
-      process.exit(1);
+        console.error(`Failed to load or process main schema: ${error.message}`);
+        if (error.stack) console.error(error.stack);
+        throw new Error(`Failed to process schema '${mainSchemaOriginalPath}': ${error.message}`);
     }
-  
-    // 5. Write Output Schemas
-    if (!mainProcessingResult || mainProcessingResult === PROCESSING_MARKER) {
-      console.warn("Processing resulted in an empty or cyclic main schema definition. Inspect cache and logs.");
-      // Optionally print cache content for debugging even if not writing files
-      console.log(`Final cache state:\n${JSON.stringify(processedCache, null, 2)}`);
-      process.exit(0); // Exit gracefully, nothing to write for main schema
+
+    // 5. Prepare for Writing - Determine Selection File Path
+    let selectionFileName: string | undefined = undefined;
+    let selectionFileAbsPath: string | undefined = undefined;
+
+    // Only proceed if the main schema processing was successful
+    if (mainProcessingResult && mainProcessingResult !== PROCESSING_MARKER) {
+        try {
+            // Calculate the output path for the *main* schema to base the selection filename on
+            const mainOutputAbsPath = getOutputPath(mainSchemaOriginalPath, baseInputDir, baseOutputDir);
+            const mainOutputDir = path.dirname(mainOutputAbsPath);
+            const mainOutputExt = path.extname(mainOutputAbsPath);
+            // Use the base name *before* the suffix is added by writeSchemaFile
+            const mainOriginalBaseName = path.basename(mainSchemaOriginalPath, path.extname(mainSchemaOriginalPath));
+            const maskedBaseName = `${mainOriginalBaseName}.m1`; // Manually construct the masked base name
+
+            selectionFileName = `${maskedBaseName}${SELECTION_FILE_SUFFIX}`; // e.g., schema_masked.selection.json
+            selectionFileAbsPath = path.join(mainOutputDir, selectionFileName);
+
+            // Ensure output directory exists (needed for selection file too)
+            if (!fs.existsSync(mainOutputDir)) {
+                fs.mkdirSync(mainOutputDir, { recursive: true });
+            }
+
+            // Write the selection file
+            console.log(`Writing selection details to: ${selectionFileAbsPath}`);
+            fs.writeFileSync(selectionFileAbsPath, JSON.stringify(rootSelection.selection, null, 2), 'utf-8');
+
+        } catch (error: any) {
+            console.error(`Failed to write selection file ${selectionFileAbsPath || 'unknown path'}: ${error.message}`);
+            // Decide if this is fatal. Let's make it non-fatal for now, but warn the user.
+            vscode.window.showWarningMessage(`Failed to write selection file: ${error.message}. Schema files might still be generated.`);
+            selectionFileName = undefined; // Ensure we don't add the x-extension if saving failed
+        }
+    } else {
+         console.warn("Main schema processing resulted in an empty or cyclic definition. Skipping selection file write.");
     }
-  
+
+
+    // 6. Write Output Schemas (including modification of main schema)
     console.log("\nWriting processed schemas...");
     console.log(`Final cache state before writing:\n${JSON.stringify(processedCache, null, 2)}`);
-  
-    // Write all schemas collected in the cache
+
     let filesWritten = 0;
+    const writtenFilesList: string[] = [];
     try {
-      for (const originalPath in processedCache) {
-          const cacheEntry = processedCache[originalPath];
-          const finalSchema = cacheEntry.outputSchema;
-  
-          // Check if outputSchema exists, is not the processing marker, and is not empty
-          if (finalSchema &&
-              finalSchema !== PROCESSING_MARKER &&
-              Object.keys(finalSchema).length > 0)
-          {
-              const outputAbsPath = getOutputPath(originalPath, baseInputDir, baseOutputDir);
-              // Ensure the finalSchema is treated as a plain object for writing
-              writeSchemaFile(outputAbsPath, finalSchema as Schema);
-              filesWritten++;
-          } else if (finalSchema === PROCESSING_MARKER) {
-               console.warn(`Schema processing for ${originalPath} seems incomplete (marker found in final cache). Not writing file.`);
-          } else {
-               // Schema processed to null or empty object
-               console.log(`Skipping write for ${originalPath} as processed schema is null or empty.`);
-          }
-      }
+        for (const originalPath in processedCache) {
+            const cacheEntry = processedCache[originalPath];
+            let finalSchema = cacheEntry.outputSchema; // Use let as it might be modified
+
+            if (finalSchema && finalSchema !== PROCESSING_MARKER && Object.keys(finalSchema).length > 0)
+            {
+                const outputAbsPath = getOutputPath(originalPath, baseInputDir, baseOutputDir);
+
+                // --- Add x-mask-selection to the MAIN schema ---
+                if (originalPath === mainSchemaOriginalPath && selectionFileName) {
+                    // Make sure finalSchema is an object we can add properties to
+                    if (typeof finalSchema === 'object' && finalSchema !== null) {
+                         // Clone to avoid modifying the cache object directly if it matters elsewhere
+                         // Although in this flow, it's likely safe to modify directly before writing
+                         // finalSchema = { ...finalSchema }; // Optional: clone if needed
+                        (finalSchema as any)['x-mask-selection'] = selectionFileName;
+                        console.log(`Added 'x-mask-selection: ${selectionFileName}' to main schema: ${outputAbsPath}`);
+                    } else {
+                        console.warn(`Cannot add 'x-mask-selection' to main schema as it's not a valid object: ${originalPath}`);
+                    }
+                }
+                // --- End modification ---
+
+                // Ensure the finalSchema is treated as a plain object for writing
+                writeSchemaFile(outputAbsPath, finalSchema as Schema); // writeSchemaFile adds the _masked suffix
+                filesWritten++;
+                // Get the filename *after* suffix is added by writeSchemaFile for the list
+                const writtenFileName = path.basename(outputAbsPath, path.extname(outputAbsPath)) + '_masked' + path.extname(outputAbsPath);
+                writtenFilesList.push(path.relative(workspaceRoot || baseInputDir, path.join(path.dirname(outputAbsPath), writtenFileName)));
+            } else if (finalSchema === PROCESSING_MARKER) {
+                console.warn(`Schema processing for ${originalPath} seems incomplete (marker found in final cache). Not writing file.`);
+            } else {
+                console.log(`Skipping write for ${originalPath} as processed schema is null or empty.`);
+            }
+        }
     } catch (error: any) {
-      console.error(`Failed during file writing: ${error.message}`);
-      process.exit(1);
+        console.error(`Failed during file writing: ${error.message}`);
+        throw new Error(`Failed during file writing: ${error.message}`);
     }
-  
+
+    // 7. Final User Feedback
     if (filesWritten > 0) {
-        console.log(`\nSchema processing complete. ${filesWritten} file(s) written.`);
+        let message = `Successfully generated ${filesWritten} masked schema file(s) in '${path.basename(baseOutputDir)}'.`;
+        if (selectionFileName) {
+            message += ` Selection details saved to '${selectionFileName}'.`;
+        }
+        message += ` Files: ${writtenFilesList.slice(0, 3).join(', ')}${writtenFilesList.length > 3 ? '...' : ''}`;
+        console.log(message);
+        vscode.window.showInformationMessage(message);
     } else {
         console.log(`\nSchema processing complete. No non-empty schemas were generated to write.`);
+        vscode.window.showWarningMessage("Mask generation finished, but no schema content was selected to be written.");
     }
-  }
+}
