@@ -1,0 +1,58 @@
+{
+    "name": "data-model-masking-extension",
+    "displayName": "Data Model Mask",
+    "description": "A VS Code extension to mask data model.",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.78.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onCommand:data-model-masking.openSchemaFile"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "data-model-masking.openSchemaFile",
+                "title": "Open in Mask Builder"
+            }
+        ],
+        "menus": {
+            "explorer/context": [
+                {
+                    "when": "resourceExtname =~ /\\.(json|yaml)$/",
+                    "command": "data-model-masking.openSchemaFile",
+                    "group": "navigation"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts",
+        "test": "node ./out/test/runTest.js",
+        "build-webview": "cd webview-ui && npm run build",
+        "install-webview": "cd webview-ui && npm install"
+    },
+    "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
+        "@types/mocha": "^10.0.1",
+        "@types/node": "16.x",
+        "@types/vscode": "^1.78.0",
+        "@typescript-eslint/eslint-plugin": "^5.59.1",
+        "@typescript-eslint/parser": "^5.59.1",
+        "@vscode/test-electron": "^2.3.0",
+        "eslint": "^8.39.0",
+        "glob": "^8.1.0",
+        "mocha": "^10.2.0",
+        "typescript": "^5.0.4"
+    },
+    "dependencies": {
+    }
+}
