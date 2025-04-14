@@ -23,72 +23,71 @@ export const getSelectionValue = (selection: SelectionValue | undefined, key: st
 
 /**
  * Resolves a relative $ref URI based on the ID of the current schema.
- * Handles basic relative paths like './sibling.json', '../parent/sibling.json', 'sub/child.json'.
+ * Handles relative paths like './sibling.json', '../parent/sibling.json', 'sub/child.json',
+ * including navigating above the starting ID's directory level (e.g., '../' from a root-level ID).
  * Assumes '/' as the path separator in URIs/IDs.
  *
- * NOTE: This is a simplified implementation for demonstration. Robust URI resolution
- * can be more complex, especially with absolute paths, fragments (#), etc.
- *
- * @param ref The $ref string (e.g., "./common/address.json").
- * @param currentId The ID of the schema containing the $ref (e.g., "schemas/main.json").
- * @returns The resolved ID string (e.g., "schemas/common/address.json").
+ * @param ref The $ref string (e.g., "../common/address.json").
+ * @param currentId The ID of the schema containing the $ref (e.g., "schemas/main.json" or "Pet.v1.yaml").
+ *                  This ID is assumed to be relative to a common base path (like mainSchemaBasePath).
+ * @returns The resolved ID string, still relative to the same common base path
+ *          (e.g., "schemas/common/address.json" or "../owner/Owner.v1.yaml").
  */
 export const resolveRefUri = (ref: string, currentId: string): string => {
-    if (!ref || !currentId) {
-        // Cannot resolve without context, return the original ref or handle as error
-        console.warn(`Cannot resolve ref '${ref}' without a valid currentId '${currentId}'`);
-        return ref;
+    console.log(`schemaUtils.resolveRefUri() Resolving ref '${ref}' relative to '${currentId}'`);
+    if (!ref || typeof currentId !== 'string') { // Added type check for currentId
+        console.warn(`Cannot resolve ref '${ref}' without a valid string currentId (got: ${currentId})`);
+        return ref; // Return original ref as fallback
     }
 
-    // If ref looks like an absolute path (or at least not starting with '.'),
-    // assume it's resolvable directly as a key in the schemas map,
-    // or handle based on a known base URI if applicable.
-    // This basic check assumes IDs like "schemas/common/address.json" are used directly.
+    // Handle non-relative refs (basic check - assumes they are direct keys)
+    // You might need more sophisticated logic if you use absolute URIs or fragments.
     if (!ref.startsWith('.')) {
-        // A more robust solution might involve URL parsing if IDs were full URLs.
-        // For simple path-like IDs, we might need more context about the 'root'.
-        // Let's assume for now that non-relative refs are used as direct keys.
-        // Example: If ref is "definitions/address" and currentId is "schemas/main",
-        // we might just return "definitions/address".
-        // A refinement could be to check if currentId has a known prefix and apply it.
-         const commonPrefixes = ['schemas/', 'definitions/', 'models/']; // Example prefixes
-         if (commonPrefixes.some(prefix => currentId.startsWith(prefix) && !ref.startsWith(prefix))) {
-             // If currentId has a prefix but ref doesn't, assume ref is relative to root of that prefix
-             const prefix = commonPrefixes.find(p => currentId.startsWith(p));
-             if (prefix) return prefix + ref;
-         }
-         // Otherwise, return the ref as is, assuming it's a direct key
+        console.log(`Treating non-relative ref '${ref}' as a direct key.`);
         return ref;
     }
 
-    // Handle relative paths (./ and ../)
-    const currentParts = currentId.split('/');
-    const refParts = ref.split('/');
+    // --- Start: Path Normalization Logic ---
 
-    // Remove the filename part from the current path to get the base directory
-    currentParts.pop();
+    // 1. Get the directory part of the current ID. If no '/', it's the root (represented by '').
+    const currentDir = currentId.includes('/') ? currentId.substring(0, currentId.lastIndexOf('/')) : '';
 
-    for (const part of refParts) {
+    // 2. Combine the current directory and the reference path.
+    // If currentDir is empty, the combined path is just the ref.
+    const combinedPath = currentDir ? `${currentDir}/${ref}` : ref;
+
+    // 3. Normalize the combined path (handle '.', '..', and '//').
+    const parts = combinedPath.split('/');
+    const resolvedParts: string[] = [];
+
+    for (const part of parts) {
         if (part === '' || part === '.') {
-            // Ignore empty parts (e.g., from '//') or current directory references '.'
+            // Skip empty parts (resulting from '//' or trailing '/') or '.' parts.
             continue;
         } else if (part === '..') {
-            // Go up one level, but don't go above the conceptual root
-            if (currentParts.length > 0) {
-                currentParts.pop();
+            // If '..', pop the last segment from resolvedParts if possible.
+            // If resolvedParts is empty, it means we are trying to go above the starting point.
+            // This is valid and the '..' should be kept.
+            if (resolvedParts.length > 0 && resolvedParts[resolvedParts.length - 1] !== '..') {
+                 // Only pop if the last part isn't already '..' (prevents reducing '../..' to '')
+                resolvedParts.pop();
             } else {
-                // Trying to go above root - log a warning
-                console.warn(`Cannot resolve '../' beyond the root from ref '${ref}' relative to '${currentId}'`);
-                // Behavior here could vary: stop, return error indicator, or stay at root.
-                // Staying at root (by doing nothing more with currentParts) is one option.
+                // Cannot go further up relative to the base, or already navigating up. Keep '..'.
+                resolvedParts.push('..');
             }
         } else {
-            // Go into a subdirectory or add the filename part
-            currentParts.push(part);
+            // It's a normal path segment.
+            resolvedParts.push(part);
         }
     }
 
-    return currentParts.join('/');
+    // 4. Join the resolved parts back together.
+    const finalResolvedPath = resolvedParts.join('/');
+
+    // --- End: Path Normalization Logic ---
+
+    console.log(`Resolved path: ${finalResolvedPath}`);
+    return finalResolvedPath;
 };
 
 // --- setDeepValue (Moved from App.tsx and Exported) ---
