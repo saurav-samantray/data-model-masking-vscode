@@ -1,6 +1,7 @@
-import React from 'react';
-import { Schema, SchemaDefinition, SelectionValue } from '../types';
-import { resolveRefUri, getSelectionValue } from '../utils/schemaUtils';
+// c:\workspace\apicurio\data-model-masking-vscode\webview-ui\src\components\SchemaNode.tsx
+import React, { useMemo } from 'react';
+import { Schema, SchemaDefinition, SelectionValue, SchemaMap } from '../types';
+import { resolveRefUri, getSelectionValue, getCombinedProperties } from '../utils/schemaUtils';
 
 // --- MUI Imports ---
 import Box from '@mui/material/Box';
@@ -19,7 +20,7 @@ interface SchemaNodeProps {
   path: (string | number)[];
   propertyName?: string;
   isRoot?: boolean;
-  allSchemas: { [id: string]: Schema };
+  allSchemas: SchemaMap;
   currentSchemaId: string;
   renderedAncestorIds: Set<string>;
 }
@@ -35,19 +36,65 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
   currentSchemaId,
   renderedAncestorIds
 }) => {
-  // Handle boolean schemas (treat as simple selection)
+
+  // ========================================================================
+  // === HOOKS MUST BE CALLED UNCONDITIONALLY AT THE TOP LEVEL =============
+  // ========================================================================
+
+  // --- Checkbox State Logic (Derived State - OK before early return) ---
+  const isDirectlySelected = selection === true;
+  const hasObjectSelection = typeof selection === 'object' && selection !== null;
+
+  // --- $ref Resolution ---
+  // Call useMemo unconditionally, but the logic inside depends on schema type
+  const { resolvedRefId, resolvedRefSchema, refError } = useMemo(() => {
+    // Only perform resolution if schema is an object and has $ref
+    if (typeof schema === 'object' && schema !== null && schema.$ref) {
+      const id = resolveRefUri(schema.$ref, currentSchemaId);
+      const targetSchema = allSchemas[id] || null;
+      const error = !targetSchema ? `Referenced schema "${id}" not found in payload.` : null;
+      if (error) console.warn(error);
+      return { resolvedRefId: id, resolvedRefSchema: targetSchema, refError: error };
+    }
+    // Return default values if not applicable
+    return { resolvedRefId: null, resolvedRefSchema: null, refError: null };
+  }, [schema, currentSchemaId, allSchemas]); // Add schema to dependencies
+
+  // --- $ref Target Selection Logic (Derived State - OK before early return) ---
+  const hasRefTargetSelection = hasObjectSelection && '$refTargetSelection' in selection;
+  const isRefTargetSelected = hasRefTargetSelection;
+
+  // --- Combined Properties Calculation ---
+  // Call useMemo unconditionally, but the logic inside depends on schema type
+  const propertiesToRender = useMemo(() => {
+    // Only calculate if schema is an object and we are not rendering the ref target
+    if (typeof schema === 'object' && schema !== null && !hasRefTargetSelection) {
+      // Calculate if it's explicitly object, has properties, or uses composition
+      if (schema.type === 'object' || schema.properties || schema.allOf || schema.anyOf || schema.oneOf) {
+        return getCombinedProperties(schema, currentSchemaId, allSchemas, new Set());
+      }
+    }
+    // Return default value if not applicable
+    return {};
+  }, [schema, currentSchemaId, allSchemas, hasRefTargetSelection]); // Add schema to dependencies
+
+  // ========================================================================
+  // === END OF HOOKS =======================================================
+  // ========================================================================
+
+
+  // --- Handle boolean schemas (Early Return - NOW SAFE) ---
   if (typeof schema === 'boolean') {
-    const isSelected = !!selection;
+    const isSelected = !!selection; // Use simple boolean check for selection
     const handleSimpleToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
-      onToggle(path, event.target.checked);
+      onToggle(path, event.target.checked ? true : undefined);
     };
 
     return (
       <Box sx={{
-        // Use theme spacing and CSS variable for border
         marginLeft: isRoot ? 0 : theme => theme.spacing(2.5),
         paddingLeft: isRoot ? 0 : theme => theme.spacing(1.25),
-        borderLeft: isRoot ? 'none' : '1px solid var(--border-color-light)', // Use CSS variable
+        borderLeft: isRoot ? 'none' : '1px solid var(--border-color-light)',
         paddingTop: theme => theme.spacing(0.5),
         paddingBottom: theme => theme.spacing(0.5),
      }}
@@ -71,72 +118,59 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
     );
   }
 
-  // --- Main Logic for Object/Array/Ref Schemas ---
-  const currentSchema = schema as Schema; // Cast since we handled boolean case
-  //const isSelected = !!selection && typeof selection !== 'object'; // Simple true selection
+  // --- Main Logic for Object/Array/Ref/Composition Schemas ---
+  // Cast is safe now because we returned if it was boolean
+  const currentSchema = schema as Schema;
 
-  // --- MODIFIED Checkbox State Logic ---
-  const isDirectlySelected = selection === true; // Is the node itself selected with 'true'?
-  const hasObjectSelection = typeof selection === 'object' && selection !== null; // Is the selection an object (meaning children/ref target are selected)?
-
+  // --- Callbacks (Define after hooks, before return) ---
   const handleToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
     const isChecked = event.target.checked;
-    // If unchecking, remove the entire selection object or set to false
-    // If checking, set to true (further refinement happens via $refTargetSelection etc.)
     onToggle(path, isChecked ? true : undefined);
   };
 
   const handleRefTargetToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
     const isChecked = event.target.checked;
-    const currentSelectionObject = typeof selection === 'object' ? selection : {};
-    const newSelection = {
-      ...currentSelectionObject,
-      $refTargetSelection: isChecked ? {} : undefined, // Initialize as empty object or remove
-    };
-    // Ensure we don't leave an empty object if $refTargetSelection is the only key
-    if (!isChecked && Object.keys(newSelection).length === 1 && newSelection.$refTargetSelection === undefined) {
-        onToggle(path, true); // Revert to simple 'true' if unchecking target and nothing else selected
+    const currentSelectionObject = hasObjectSelection ? selection : {};
+    let newSelection: SelectionValue | undefined;
+
+    if (isChecked) {
+      newSelection = {
+        ...currentSelectionObject,
+        $refTargetSelection: true,
+      };
     } else {
-        onToggle(path, newSelection);
+      const { $refTargetSelection, ...rest } = currentSelectionObject;
+      newSelection = Object.keys(rest).length > 0 ? rest : undefined;
     }
+    onToggle(path, newSelection);
   };
 
-  const hasRefTargetSelection = typeof selection === 'object' && selection !== null && '$refTargetSelection' in selection;
-  const isRefTargetSelected = hasRefTargetSelection; // Checkbox reflects if the $refTargetSelection key exists
-
-  // Resolve $ref
-  let resolvedRefSchema: Schema | null = null;
-  let resolvedRefId: string | null = null;
-  let refError: string | null = null;
-
-  if (currentSchema.$ref) {
-      resolvedRefId = resolveRefUri(currentSchema.$ref, currentSchemaId);
-      resolvedRefSchema = allSchemas[resolvedRefId] || null;
-      if (!resolvedRefSchema) {
-          refError = `Referenced schema "${resolvedRefId}" not found in payload.`;
-          console.warn(refError);
-      }
-  }
-
+  // --- Derived State / Conditions for Rendering (Define after hooks, before return) ---
   const isCircularOrRepeatedRef = !!resolvedRefId && renderedAncestorIds.has(resolvedRefId);
-
-  // Determine if children should be rendered based on type and $ref selection
-  const shouldRenderObjectChildren = currentSchema.type === 'object' && currentSchema.properties;
-  const shouldRenderArrayChildren = currentSchema.type === 'array' && currentSchema.items && typeof currentSchema.items === 'object';
-
-  // --- MODIFIED Condition for rendering children ---
-  // Render children if there is *any* selection for this node (true or object)
   const shouldRenderAnyChildren = !!selection;
+  const couldBeObject = currentSchema.type === 'object' || currentSchema.properties || currentSchema.allOf || currentSchema.anyOf || currentSchema.oneOf || Object.keys(propertiesToRender).length > 0;
+  const couldBeArray = currentSchema.type === 'array' && currentSchema.items;
+  const itemsSchema = (couldBeArray && typeof currentSchema.items === 'object' && !Array.isArray(currentSchema.items)) ? currentSchema.items as Schema : null;
+  let compositionType = "allOf";
+  if (currentSchema.anyOf) compositionType = "anyOf";
+  if (currentSchema.oneOf) compositionType = "oneOf";
+  
 
+  // --- Label Content ---
   const labelContent = (
     <Box display="flex" alignItems="center">
       <Typography variant="body1" component="span" sx={{ fontWeight: 'bold', mr: 1 }}>
-        {propertyName || (currentSchema.title || 'Root')}
+        {propertyName || (currentSchema.title || (isRoot ? 'Root Schema' : 'Schema'))}
       </Typography>
-      {currentSchema.type && (
+      {!currentSchema.$ref && currentSchema.type && (
         <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>
           ({currentSchema.type})
         </Typography>
+      )}
+      {!currentSchema.$ref && (currentSchema.allOf || currentSchema.anyOf || currentSchema.oneOf) && (
+         <Typography variant="caption" color="text.secondary" sx={{ mr: 1, fontStyle: 'italic' }}>
+           (Composition: {compositionType})
+         </Typography>
       )}
       {currentSchema.description && (
         <Tooltip title={currentSchema.description} placement="right">
@@ -148,23 +182,23 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
     </Box>
   );
 
+  // --- Component Return (for non-boolean schemas) ---
   return (
     <Box sx={{
         marginLeft: isRoot ? 0 : theme => theme.spacing(2.5),
         paddingLeft: isRoot ? 0 : theme => theme.spacing(1.25),
-        borderLeft: isRoot ? 'none' : '1px solid #eee',
+        borderLeft: isRoot ? 'none' : '1px solid var(--border-color-light)',
         paddingTop: theme => theme.spacing(0.5),
         paddingBottom: theme => theme.spacing(0.5),
      }}>
       {/* Main Node Toggle and Info */}
       <Box>
-      <FormControlLabel
+        <FormControlLabel
           control={
             <Checkbox
               size="small"
-              // --- MODIFIED Checkbox State ---
-              checked={isDirectlySelected} // Checked only if selection is exactly 'true'
-              indeterminate={hasObjectSelection} // Indeterminate if selection is an object
+              checked={isDirectlySelected}
+              indeterminate={hasObjectSelection}
               onChange={handleToggle}
               id={`toggle-${path.join('-')}`}
             />
@@ -175,7 +209,7 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
 
         {/* Display $ref info */}
         {(currentSchema.$ref || refError) && (
-          <Box sx={{ pl: 4, mt: -0.5, mb: 0.5 }}> {/* Indent under the checkbox */}
+          <Box sx={{ pl: 4, mt: -0.5, mb: 0.5 }}>
             {currentSchema.$ref && (
               <Typography variant="caption" color="info.main">
                 $ref: {currentSchema.$ref} {resolvedRefId && `(resolves to: ${resolvedRefId})`}
@@ -189,9 +223,9 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
           </Box>
         )}
 
-        {/* $refTargetSelection Toggle (only if $ref exists and is resolved and parent is selected) */}
+        {/* $refTargetSelection Toggle */}
         {currentSchema.$ref && shouldRenderAnyChildren && resolvedRefSchema && (
-          <Box sx={{ pl: 4, mt: -0.5, mb: 0.5 }}> {/* Indent under the checkbox */}
+          <Box sx={{ pl: 4, mt: -0.5, mb: 0.5 }}>
             <FormControlLabel
               control={
                 <Checkbox
@@ -218,91 +252,86 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
       </Box>
 
       {/* --- Render Children --- */}
-      {/* --- Use shouldRenderAnyChildren --- */}
       {shouldRenderAnyChildren && (
-      <Box>
-        {/* 1. Render Resolved $ref Content */}
-        {hasRefTargetSelection && resolvedRefSchema && resolvedRefId && !isCircularOrRepeatedRef && (
-          <Box sx={{
-              // Use CSS variable for dotted border
-              borderLeft: theme => `2px dotted var(--ref-border-color)`,
-              pl: theme => theme.spacing(1.25),
-              ml: theme => theme.spacing(-1.5),
-              mt: theme => theme.spacing(0.5)
-            }}>
-            <SchemaNode
-              // --- ADD KEY for resolved ref ---
-              key={`${resolvedRefId}-resolved`}
-              schema={resolvedRefSchema}
-              currentSchemaId={resolvedRefId}
-              selection={getSelectionValue(selection, '$refTargetSelection')}
-              path={[...path, '$refTargetSelection']}
-              onToggle={onToggle}
-              allSchemas={allSchemas}
-              propertyName={`(Resolved $ref: ${resolvedRefId})`}
-              isRoot={false}
-              renderedAncestorIds={new Set([...renderedAncestorIds, currentSchemaId])}
-            />
-          </Box>
-        )}
+        <Box>
+          {/* 1. Render Resolved $ref Content */}
+          {hasRefTargetSelection && resolvedRefSchema && resolvedRefId && !isCircularOrRepeatedRef && (
+            <Box sx={{
+                borderLeft: theme => `2px dotted var(--ref-border-color)`,
+                pl: theme => theme.spacing(1.25),
+                ml: theme => theme.spacing(-1.5),
+                mt: theme => theme.spacing(0.5)
+              }}>
+              <SchemaNode
+                key={`${resolvedRefId}-resolved`}
+                schema={resolvedRefSchema}
+                currentSchemaId={resolvedRefId}
+                selection={getSelectionValue(selection, '$refTargetSelection')}
+                path={[...path, '$refTargetSelection']}
+                onToggle={onToggle}
+                allSchemas={allSchemas}
+                propertyName={`(Resolved $ref: ${resolvedRefId})`}
+                isRoot={false}
+                renderedAncestorIds={new Set([...renderedAncestorIds, currentSchemaId])}
+              />
+            </Box>
+          )}
 
-        {/* 2. Render Object Properties */}
-        {shouldRenderObjectChildren && !hasRefTargetSelection && currentSchema.properties && (
-          <Box>
-            {Object.entries(currentSchema.properties).map(([key, propSchema]) => {
-              const childSelectionPath = [...path, 'properties', key];
-              const childSelectionValue = getSelectionValue(getSelectionValue(selection, 'properties'), key);
+          {/* 2. Render Object Properties (Combined) */}
+          {couldBeObject && !hasRefTargetSelection && Object.keys(propertiesToRender).length > 0 && (
+            <Box>
+              {Object.entries(propertiesToRender).map(([key, propSchema]) => {
+                const childSelectionPath = [...path, 'properties', key];
+                const childSelectionValue = getSelectionValue(getSelectionValue(selection, 'properties'), key);
 
-              return (
-                <SchemaNode
-                  key={key} // Key is already stable here based on property name
-                  schema={propSchema}
-                  selection={childSelectionValue}
-                  onToggle={onToggle}
-                  path={childSelectionPath}
-                  propertyName={key}
-                  allSchemas={allSchemas}
-                  currentSchemaId={currentSchemaId}
-                  isRoot={false}
-                  renderedAncestorIds={new Set([...renderedAncestorIds, currentSchemaId])}
-                />
-              );
-            })}
-          </Box>
-        )}
+                return (
+                  <SchemaNode
+                    key={key}
+                    schema={propSchema}
+                    selection={childSelectionValue}
+                    onToggle={onToggle}
+                    path={childSelectionPath}
+                    propertyName={key}
+                    allSchemas={allSchemas}
+                    currentSchemaId={currentSchemaId}
+                    isRoot={false}
+                    renderedAncestorIds={new Set([...renderedAncestorIds, currentSchemaId])}
+                  />
+                );
+              })}
+            </Box>
+          )}
 
-        {/* 3. Render Array Items (only if selected and not rendering resolved ref content OR if no ref exists) */}
-        {shouldRenderArrayChildren && !hasRefTargetSelection && currentSchema.items && (
-          <Box>
-            {(() => {
-              const itemsSelectionPath = [...path, 'items'];
-              const itemsSelectionValue = getSelectionValue(selection, 'items');
-              const itemsSchema = (typeof currentSchema.items === 'object' && !Array.isArray(currentSchema.items)) ? currentSchema.items as Schema : null;
+          {/* 3. Render Array Items */}
+          {couldBeArray && !hasRefTargetSelection && itemsSchema && (
+            <Box>
+              {(() => {
+                const itemsSelectionPath = [...path, 'items'];
+                const itemsSelectionValue = getSelectionValue(selection, 'items');
 
-              return itemsSchema ? (
-                <SchemaNode
-                  // --- ADD KEY for items node ---
-                  key={`${path.join('-')}-items-node`} // Use path to ensure uniqueness if multiple arrays exist
-                  schema={itemsSchema}
-                  selection={itemsSelectionValue}
-                  onToggle={onToggle}
-                  path={itemsSelectionPath}
-                  propertyName="items"
-                  allSchemas={allSchemas}
-                  currentSchemaId={currentSchemaId}
-                  isRoot={false}
-                  renderedAncestorIds={new Set([...renderedAncestorIds, currentSchemaId])}
-                />
-              ) : (
-                // Handle case where items is not a schema object (e.g., boolean) or is missing
-                 <Typography variant="caption" color="text.secondary" sx={{ ml: 2.5, pl: 1.25 }}>
-                    (Array items definition is not a schema object)
+                return (
+                  <SchemaNode
+                    key={`${path.join('-')}-items-node`}
+                    schema={itemsSchema}
+                    selection={itemsSelectionValue}
+                    onToggle={onToggle}
+                    path={itemsSelectionPath}
+                    propertyName="items"
+                    allSchemas={allSchemas}
+                    currentSchemaId={currentSchemaId}
+                    isRoot={false}
+                    renderedAncestorIds={new Set([...renderedAncestorIds, currentSchemaId])}
+                  />
+                );
+              })()}
+            </Box>
+          )}
+           {couldBeArray && !hasRefTargetSelection && !itemsSchema && currentSchema.items !== undefined && (
+                 <Typography variant="caption" color="text.secondary" sx={{ ml: 2.5, pl: 1.25, display: 'block' }}>
+                    (Array items definition is not a renderable schema object)
                  </Typography>
-              );
-            })()}
-          </Box>
-        )}
-      </Box>
+           )}
+        </Box>
       )}
     </Box>
   );

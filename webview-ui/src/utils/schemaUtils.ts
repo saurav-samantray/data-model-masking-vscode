@@ -115,3 +115,70 @@ export const setDeepValue = (obj: any, path: (string | number)[], value: Selecti
     return Object.keys(currentLevel).length > 0 ? currentLevel : undefined;
 };
 
+// --- NEW: Helper to get combined properties handling composition ---
+/**
+ * Recursively collects properties from a schema, handling $ref and composition keywords.
+ * For masking purposes, it merges properties from allOf, anyOf, oneOf.
+ *
+ * @param schema The schema object to analyze.
+ * @param schemaId The ID of the current schema (for resolving relative refs).
+ * @param allSchemas The complete map of schemas from the payload.
+ * @param visitedRefs Set to track visited refs and prevent infinite loops.
+ * @returns A map of property names to their schema definitions.
+ */
+export const getCombinedProperties = (
+    schema: Schema | undefined | null,
+    schemaId: string,
+    allSchemas: SchemaMap,
+    visitedRefs: Set<string> = new Set() // Initialize visitedRefs for cycle detection
+): { [key: string]: Schema } => {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+        return {};
+    }
+
+    // --- Handle $ref ---
+    if (schema.$ref && typeof schema.$ref === 'string') {
+        const resolvedId = resolveRefUri(schema.$ref, schemaId);
+        if (visitedRefs.has(resolvedId)) {
+            console.warn(`Cycle detected resolving $ref "${schema.$ref}" from ${schemaId} to ${resolvedId}. Stopping recursion.`);
+            return {}; // Avoid infinite loop
+        }
+        const referencedSchema = allSchemas[resolvedId];
+        if (referencedSchema) {
+            visitedRefs.add(resolvedId); // Mark as visited *before* recursing
+            const props = getCombinedProperties(referencedSchema, resolvedId, allSchemas, visitedRefs);
+            visitedRefs.delete(resolvedId); // Remove after returning (allows revisiting via different paths)
+            return props;
+        } else {
+            console.warn(`Could not resolve $ref "${schema.$ref}" from ${schemaId} to ID "${resolvedId}" in schema map.`);
+            return {};
+        }
+    }
+
+    // --- Combine properties from direct definition and composition ---
+    let combinedProps: { [key: string]: Schema } = {};
+
+    // 1. Direct properties
+    if (schema.properties && typeof schema.properties === 'object') {
+        combinedProps = { ...schema.properties };
+    }
+
+    // 2. Composition keywords (allOf, anyOf, oneOf) - Merge properties from all subschemas
+    const processCompositionArray = (arr: Schema[] | undefined) => {
+        if (Array.isArray(arr)) {
+            arr.forEach(subSchema => {
+                // Pass the *current* schemaId and the existing visitedRefs set
+                const subSchemaProps = getCombinedProperties(subSchema, schemaId, allSchemas, visitedRefs);
+                // Simple merge: later definitions overwrite earlier ones if names clash
+                combinedProps = { ...combinedProps, ...subSchemaProps };
+            });
+        }
+    };
+
+    processCompositionArray(schema.allOf);
+    processCompositionArray(schema.anyOf);
+    processCompositionArray(schema.oneOf);
+
+    return combinedProps;
+};
+
