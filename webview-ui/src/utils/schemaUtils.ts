@@ -182,3 +182,16 @@ export const getCombinedProperties = (
     return combinedProps;
 };
 
+/**
+ * Extracts the filename without extension from a full filename string.
+ * @param filePath - A string containing the filename (with extension).
+ * @returns The filename without extension.
+ */
+export function getFilenameWithoutExtension(filePath: string | null): string {
+    if (!filePath) {
+        return ''; // Return empty string if filePath is null or undefined
+    }
+    const fileNameWithExt = filePath.split('/').pop() || filePath;
+    return fileNameWithExt.replace(/\.[^/.]+$/, '');
+  }
+

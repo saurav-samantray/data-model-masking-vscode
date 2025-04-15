@@ -479,9 +479,9 @@ export async function generateMask(selectionJsonString: string, originalContextF
                 // --- End modification ---
 
                 // Ensure the finalSchema is treated as a plain object for writing
-                writeSchemaFile(outputAbsPath, finalSchema as Schema, maskSuffix);
+                writeSchemaFile(outputAbsPath, finalSchema as Schema, rootSelection.maskFileNameBase, maskSuffix, rootSelection.maskExtension);
                 filesWritten++;
-                const writtenFileNameWithSuffix = path.basename(outputAbsPath, path.extname(outputAbsPath)) + MASK_SUFFIX + path.extname(outputAbsPath); // Construct name with suffix
+                const writtenFileNameWithSuffix = path.basename(outputAbsPath, path.extname(outputAbsPath)) + maskSuffix + path.extname(outputAbsPath); // Construct name with suffix
                 writtenFilesList.push(path.relative(workspaceRoot || baseInputDir, path.join(path.dirname(outputAbsPath), writtenFileNameWithSuffix)));
             } else if (finalSchema === PROCESSING_MARKER) {
                 console.warn(`Schema processing for ${originalPath} seems incomplete (marker found in final cache). Not writing file.`);

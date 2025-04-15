@@ -43,6 +43,12 @@ export interface RootSelection {
 
   // Optional: Specify the mask file suffix (for file naming)
   maskSuffix?: string;
+
+  // Optional: Specify the mask file name base (for file naming)
+  maskFileNameBase?: string;
+
+  // Optional: Specify the mask file extension (for file naming)
+  maskExtension?: string;
 }
 
 // Internal cache for processed schemas to avoid redundant work and handle circular refs (basic)

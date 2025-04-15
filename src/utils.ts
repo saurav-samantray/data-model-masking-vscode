@@ -83,15 +83,16 @@ export function getOutputPath(
  * Uses the provided suffix to name the output file.
  */
 // *** CHANGE: Add maskSuffix parameter ***
-export function writeSchemaFile(filePath: string, schema: Schema, maskSuffix: string): void {
+export function writeSchemaFile(filePath: string, schema: Schema,
+     maskFileNameBase: string | undefined, maskSuffix: string, maskExtension: string | undefined): void {
     // *** REMOVE: Hardcoded suffix ***
     // const suffix = '.m1'; // Define the suffix to add
 
     try {
         // 1. Separate directory, base filename, and extension
         const dir = path.dirname(filePath);
-        const ext = path.extname(filePath); // e.g., ".json"
-        const baseName = path.basename(filePath, ext); // e.g., "schema"
+        const ext = maskExtension || path.extname(filePath); // e.g., ".json"
+        const baseName = maskFileNameBase || path.basename(filePath, ext); // e.g., "schema"
 
         // 2. Construct the new filename with the provided suffix
         // *** CHANGE: Use maskSuffix parameter ***
@@ -104,7 +105,13 @@ export function writeSchemaFile(filePath: string, schema: Schema, maskSuffix: st
         }
 
         // 4. Stringify the schema content
-        const content = JSON.stringify(schema, null, 2);
+        let content: string;
+        if (ext === '.yaml' || ext === '.yml') {
+            content = jsYaml.dump(schema);
+        } else {
+            content = JSON.stringify(schema, null, 2); // Pretty print JSON
+        }
+        //const content = JSON.stringify(schema, null, 2);
 
         // 5. Write the file using the NEW path
         fs.writeFileSync(newFilePath, content, 'utf-8');
