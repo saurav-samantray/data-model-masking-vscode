@@ -36,6 +36,7 @@ export function processSchema(
     baseInputDir: string,
     baseOutputDir: string,
     processedCache: ProcessingCache,
+    maskSuffix: string, // *** ADD maskSuffix parameter ***
     isTopLevelCall: boolean = true // Default to true for external calls
 ): SchemaType | null | typeof PROCESSING_MARKER {
 
@@ -123,6 +124,7 @@ export function processSchema(
                         baseInputDir,
                         baseOutputDir,
                         processedCache,
+                        maskSuffix, // Pass suffix down
                         true // This is a top-level call for the referenced file
                     );
                 }
@@ -143,7 +145,7 @@ export function processSchema(
                 const refDir = path.dirname(refOutputRelativePath);
                 const refExt = path.extname(refOutputRelativePath);
                 const refBaseName = path.basename(refOutputRelativePath, refExt);
-                const maskedRefFileName = `${refBaseName}${MASK_SUFFIX}${refExt}`; // Use constant
+                const maskedRefFileName = `${refBaseName}${maskSuffix}${refExt}`;
                 refOutputRelativePath = path.join(refDir, maskedRefFileName).replace(/\\/g, '/');
 
                 if (!refOutputRelativePath.startsWith('.') && !refOutputRelativePath.startsWith('/')) {
@@ -194,6 +196,7 @@ export function processSchema(
                             baseInputDir,
                             baseOutputDir,
                             processedCache,
+                            maskSuffix, // Pass suffix down
                             false // Not a top-level call for the file
                         );
 
@@ -234,6 +237,7 @@ export function processSchema(
                     baseInputDir,
                     baseOutputDir,
                     processedCache,
+                    maskSuffix, // Pass suffix down
                     false // Not a top-level call
                 );
 
@@ -267,6 +271,7 @@ export function processSchema(
                             baseInputDir,
                             baseOutputDir,
                             processedCache,
+                            maskSuffix, // Pass suffix down
                             false // Not a top-level call
                         );
 
@@ -328,6 +333,7 @@ export async function generateMask(selectionJsonString: string, originalContextF
 
     // 1. Parse Selection Definition
     let rootSelection: RootSelection;
+    let maskSuffix: string; // Variable to hold the validated suffix
     try {
         rootSelection = JSON.parse(selectionJsonString);
         if (!rootSelection.mainSchemaId || typeof rootSelection.mainSchemaId !== 'string') {
@@ -337,6 +343,11 @@ export async function generateMask(selectionJsonString: string, originalContextF
         if (!rootSelection.selection) {
              throw new Error("Parsed selection must contain a 'selection' property (boolean true or object).");
         }
+        // *** ADD: Extract and validate maskSuffix ***
+        if (!rootSelection.maskSuffix || typeof rootSelection.maskSuffix !== 'string' || rootSelection.maskSuffix.trim().length === 0) {
+            throw new Error("Parsed selection must contain a non-empty 'maskSuffix' (string).");
+        }
+        maskSuffix = rootSelection.maskSuffix.trim(); // Store the validated suffix
         console.log("Successfully parsed selection JSON.");
     } catch (error: any) {
         console.error(`Error parsing selection JSON string: ${error.message}`);
@@ -389,6 +400,7 @@ export async function generateMask(selectionJsonString: string, originalContextF
             baseInputDir,
             baseOutputDir,
             processedCache,
+            maskSuffix, // Pass suffix down
             true // This is the top-level call
         );
     } catch (error: any) {
@@ -408,7 +420,7 @@ export async function generateMask(selectionJsonString: string, originalContextF
             const mainOutputAbsPath = getOutputPath(mainSchemaOriginalPath, baseInputDir, baseOutputDir);
             const mainOutputDir = path.dirname(mainOutputAbsPath);
             const mainOriginalBaseName = path.basename(mainSchemaOriginalPath, path.extname(mainSchemaOriginalPath));
-            const maskedBaseName = `${mainOriginalBaseName}${MASK_SUFFIX}`; // Use constant
+            const maskedBaseName = `${mainOriginalBaseName}${maskSuffix}`; // Add suffix to the base name
 
             selectionFileName = `${maskedBaseName}${SELECTION_FILE_SUFFIX}`;
             selectionFileAbsPath = path.join(mainOutputDir, selectionFileName);
@@ -467,7 +479,7 @@ export async function generateMask(selectionJsonString: string, originalContextF
                 // --- End modification ---
 
                 // Ensure the finalSchema is treated as a plain object for writing
-                writeSchemaFile(outputAbsPath, finalSchema as Schema); // writeSchemaFile adds the suffix
+                writeSchemaFile(outputAbsPath, finalSchema as Schema, maskSuffix);
                 filesWritten++;
                 const writtenFileNameWithSuffix = path.basename(outputAbsPath, path.extname(outputAbsPath)) + MASK_SUFFIX + path.extname(outputAbsPath); // Construct name with suffix
                 writtenFilesList.push(path.relative(workspaceRoot || baseInputDir, path.join(path.dirname(outputAbsPath), writtenFileNameWithSuffix)));

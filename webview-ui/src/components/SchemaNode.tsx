@@ -46,9 +46,7 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
   const hasObjectSelection = typeof selection === 'object' && selection !== null;
 
   // --- $ref Resolution ---
-  // Call useMemo unconditionally, but the logic inside depends on schema type
   const { resolvedRefId, resolvedRefSchema, refError } = useMemo(() => {
-    // Only perform resolution if schema is an object and has $ref
     if (typeof schema === 'object' && schema !== null && schema.$ref) {
       const id = resolveRefUri(schema.$ref, currentSchemaId);
       const targetSchema = allSchemas[id] || null;
@@ -56,27 +54,22 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
       if (error) console.warn(error);
       return { resolvedRefId: id, resolvedRefSchema: targetSchema, refError: error };
     }
-    // Return default values if not applicable
     return { resolvedRefId: null, resolvedRefSchema: null, refError: null };
-  }, [schema, currentSchemaId, allSchemas]); // Add schema to dependencies
+  }, [schema, currentSchemaId, allSchemas]);
 
   // --- $ref Target Selection Logic (Derived State - OK before early return) ---
   const hasRefTargetSelection = hasObjectSelection && '$refTargetSelection' in selection;
   const isRefTargetSelected = hasRefTargetSelection;
 
   // --- Combined Properties Calculation ---
-  // Call useMemo unconditionally, but the logic inside depends on schema type
   const propertiesToRender = useMemo(() => {
-    // Only calculate if schema is an object and we are not rendering the ref target
     if (typeof schema === 'object' && schema !== null && !hasRefTargetSelection) {
-      // Calculate if it's explicitly object, has properties, or uses composition
       if (schema.type === 'object' || schema.properties || schema.allOf || schema.anyOf || schema.oneOf) {
         return getCombinedProperties(schema, currentSchemaId, allSchemas, new Set());
       }
     }
-    // Return default value if not applicable
     return {};
-  }, [schema, currentSchemaId, allSchemas, hasRefTargetSelection]); // Add schema to dependencies
+  }, [schema, currentSchemaId, allSchemas, hasRefTargetSelection]);
 
   // ========================================================================
   // === END OF HOOKS =======================================================
@@ -85,18 +78,19 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
 
   // --- Handle boolean schemas (Early Return - NOW SAFE) ---
   if (typeof schema === 'boolean') {
-    const isSelected = !!selection; // Use simple boolean check for selection
+    const isSelected = !!selection;
     const handleSimpleToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
       onToggle(path, event.target.checked ? true : undefined);
     };
 
     return (
       <Box sx={{
-        marginLeft: isRoot ? 0 : theme => theme.spacing(2.5),
-        paddingLeft: isRoot ? 0 : theme => theme.spacing(1.25),
+        // Reduced indentation and vertical padding
+        marginLeft: isRoot ? 0 : theme => theme.spacing(1.5), // Reduced from 2.5
+        paddingLeft: isRoot ? 0 : theme => theme.spacing(1),   // Reduced from 1.25
         borderLeft: isRoot ? 'none' : '1px solid var(--border-color-light)',
-        paddingTop: theme => theme.spacing(0.5),
-        paddingBottom: theme => theme.spacing(0.5),
+        paddingTop: theme => theme.spacing(0.25), // Reduced from 0.5
+        paddingBottom: theme => theme.spacing(0.25), // Reduced from 0.5
      }}
       >
         <FormControlLabel
@@ -106,6 +100,7 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
               checked={isSelected}
               onChange={handleSimpleToggle}
               id={`toggle-${path.join('-')}`}
+              sx={{ py: 0 }} // Reduce vertical padding on checkbox itself
             />
           }
           label={
@@ -113,16 +108,16 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
               {propertyName || 'Schema'} (Boolean: {schema.toString()})
             </Typography>
           }
+          sx={{ m: 0 }} // Remove margin from FormControlLabel
         />
       </Box>
     );
   }
 
   // --- Main Logic for Object/Array/Ref/Composition Schemas ---
-  // Cast is safe now because we returned if it was boolean
   const currentSchema = schema as Schema;
 
-  // --- Callbacks (Define after hooks, before return) ---
+  // --- Callbacks ---
   const handleToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
     const isChecked = event.target.checked;
     onToggle(path, isChecked ? true : undefined);
@@ -145,7 +140,7 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
     onToggle(path, newSelection);
   };
 
-  // --- Derived State / Conditions for Rendering (Define after hooks, before return) ---
+  // --- Derived State / Conditions for Rendering ---
   const isCircularOrRepeatedRef = !!resolvedRefId && renderedAncestorIds.has(resolvedRefId);
   const shouldRenderAnyChildren = !!selection;
   const couldBeObject = currentSchema.type === 'object' || currentSchema.properties || currentSchema.allOf || currentSchema.anyOf || currentSchema.oneOf || Object.keys(propertiesToRender).length > 0;
@@ -154,26 +149,30 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
   let compositionType = "allOf";
   if (currentSchema.anyOf) compositionType = "anyOf";
   if (currentSchema.oneOf) compositionType = "oneOf";
-  
+
 
   // --- Label Content ---
   const labelContent = (
     <Box display="flex" alignItems="center">
-      <Typography variant="body1" component="span" sx={{ fontWeight: 'bold', mr: 1 }}>
+      {/* Changed to body2, reduced right margin */}
+      <Typography variant="body2" component="span" sx={{ fontWeight: 'bold', mr: 0.5 }}>
         {propertyName || (currentSchema.title || (isRoot ? 'Root Schema' : 'Schema'))}
       </Typography>
+      {/* Reduced right margin */}
       {!currentSchema.$ref && currentSchema.type && (
-        <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
           ({currentSchema.type})
         </Typography>
       )}
+      {/* Reduced right margin */}
       {!currentSchema.$ref && (currentSchema.allOf || currentSchema.anyOf || currentSchema.oneOf) && (
-         <Typography variant="caption" color="text.secondary" sx={{ mr: 1, fontStyle: 'italic' }}>
-           (Composition: {compositionType})
+         <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5, fontStyle: 'italic' }}>
+           (Composition: {compositionType}) {/* Shortened label */}
          </Typography>
       )}
       {currentSchema.description && (
         <Tooltip title={currentSchema.description} placement="right">
+          {/* Removed padding from IconButton */}
           <IconButton size="small" sx={{ p: 0 }}>
             <InfoOutlinedIcon fontSize="inherit" color="action" />
           </IconButton>
@@ -185,11 +184,12 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
   // --- Component Return (for non-boolean schemas) ---
   return (
     <Box sx={{
-        marginLeft: isRoot ? 0 : theme => theme.spacing(2.5),
-        paddingLeft: isRoot ? 0 : theme => theme.spacing(1.25),
+        // Reduced indentation and vertical padding
+        marginLeft: isRoot ? 0 : theme => theme.spacing(1.5), // Reduced from 2.5
+        paddingLeft: isRoot ? 0 : theme => theme.spacing(1),   // Reduced from 1.25
         borderLeft: isRoot ? 'none' : '1px solid var(--border-color-light)',
-        paddingTop: theme => theme.spacing(0.5),
-        paddingBottom: theme => theme.spacing(0.5),
+        paddingTop: theme => theme.spacing(0.25), // Reduced from 0.5
+        paddingBottom: theme => theme.spacing(0.25), // Reduced from 0.5
      }}>
       {/* Main Node Toggle and Info */}
       <Box>
@@ -201,22 +201,25 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
               indeterminate={hasObjectSelection}
               onChange={handleToggle}
               id={`toggle-${path.join('-')}`}
+              sx={{ py: 0 }} // Reduce vertical padding on checkbox itself
             />
           }
           label={labelContent}
-          sx={{ mb: (currentSchema.$ref || refError) ? 0 : 1 }}
+          // Removed bottom margin, rely on Box padding
+          sx={{ m: 0 }} // Remove margin from FormControlLabel
         />
 
         {/* Display $ref info */}
+        {/* Reduced padding/margins */}
         {(currentSchema.$ref || refError) && (
-          <Box sx={{ pl: 4, mt: -0.5, mb: 0.5 }}>
+          <Box sx={{ pl: 3.5, mt: 0, mb: 0.25 }}> {/* Reduced pl, mt, mb */}
             {currentSchema.$ref && (
-              <Typography variant="caption" color="info.main">
-                $ref: {currentSchema.$ref} {resolvedRefId && `(resolves to: ${resolvedRefId})`}
+              <Typography variant="caption" color="info.main" sx={{ display: 'block' }}> {/* Ensure block display */}
+                $ref: {currentSchema.$ref} {resolvedRefId && `(${resolvedRefId})`} {/* Shortened resolves to */}
               </Typography>
             )}
             {refError && (
-              <Typography variant="caption" color="error.main">
+              <Typography variant="caption" color="error.main" sx={{ display: 'block' }}> {/* Ensure block display */}
                 Error: {refError}
               </Typography>
             )}
@@ -224,8 +227,9 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
         )}
 
         {/* $refTargetSelection Toggle */}
+        {/* Reduced padding/margins */}
         {currentSchema.$ref && shouldRenderAnyChildren && resolvedRefSchema && (
-          <Box sx={{ pl: 4, mt: -0.5, mb: 0.5 }}>
+          <Box sx={{ pl: 3.5, mt: 0, mb: 0.25 }}> {/* Reduced pl, mt, mb */}
             <FormControlLabel
               control={
                 <Checkbox
@@ -234,18 +238,21 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
                   checked={isRefTargetSelected}
                   onChange={handleRefTargetToggle}
                   disabled={isCircularOrRepeatedRef}
+                  sx={{ py: 0 }} // Reduce vertical padding
                 />
               }
               label={
                 <Box display="flex" alignItems="center">
-                    <Typography variant="body2">Select Target Properties</Typography>
+                    {/* Changed to caption */}
+                    <Typography variant="caption">Select Target Props</Typography> {/* Shortened label */}
                     {isCircularOrRepeatedRef && (
-                        <Typography variant="caption" sx={{ color: 'warning.main', fontStyle: 'italic', ml: 1 }}>
-                            (Selection inherited due to cycle/repeat)
+                        <Typography variant="caption" sx={{ color: 'warning.main', fontStyle: 'italic', ml: 0.5 }}> {/* Reduced ml */}
+                            (Inherited: cycle/repeat) {/* Shortened label */}
                         </Typography>
                     )}
                 </Box>
               }
+              sx={{ m: 0 }} // Remove margin from FormControlLabel
             />
           </Box>
         )}
@@ -257,10 +264,11 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
           {/* 1. Render Resolved $ref Content */}
           {hasRefTargetSelection && resolvedRefSchema && resolvedRefId && !isCircularOrRepeatedRef && (
             <Box sx={{
+                // Adjusted ref border styling slightly
                 borderLeft: theme => `2px dotted var(--ref-border-color)`,
-                pl: theme => theme.spacing(1.25),
-                ml: theme => theme.spacing(-1.5),
-                mt: theme => theme.spacing(0.5)
+                pl: theme => theme.spacing(1), // Reduced from 1.25
+                ml: theme => theme.spacing(-1.25), // Adjusted margin slightly
+                mt: theme => theme.spacing(0.25) // Reduced from 0.5
               }}>
               <SchemaNode
                 key={`${resolvedRefId}-resolved`}
@@ -270,7 +278,7 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
                 path={[...path, '$refTargetSelection']}
                 onToggle={onToggle}
                 allSchemas={allSchemas}
-                propertyName={`(Resolved $ref: ${resolvedRefId})`}
+                propertyName={`($ref: ${resolvedRefId})`} // Shortened label
                 isRoot={false}
                 renderedAncestorIds={new Set([...renderedAncestorIds, currentSchemaId])}
               />
@@ -279,7 +287,7 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
 
           {/* 2. Render Object Properties (Combined) */}
           {couldBeObject && !hasRefTargetSelection && Object.keys(propertiesToRender).length > 0 && (
-            <Box>
+            <Box> {/* No extra padding needed here, child nodes handle their own */}
               {Object.entries(propertiesToRender).map(([key, propSchema]) => {
                 const childSelectionPath = [...path, 'properties', key];
                 const childSelectionValue = getSelectionValue(getSelectionValue(selection, 'properties'), key);
@@ -304,7 +312,7 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
 
           {/* 3. Render Array Items */}
           {couldBeArray && !hasRefTargetSelection && itemsSchema && (
-            <Box>
+            <Box> {/* No extra padding needed here */}
               {(() => {
                 const itemsSelectionPath = [...path, 'items'];
                 const itemsSelectionValue = getSelectionValue(selection, 'items');
@@ -327,8 +335,9 @@ const SchemaNode: React.FC<SchemaNodeProps> = ({
             </Box>
           )}
            {couldBeArray && !hasRefTargetSelection && !itemsSchema && currentSchema.items !== undefined && (
-                 <Typography variant="caption" color="text.secondary" sx={{ ml: 2.5, pl: 1.25, display: 'block' }}>
-                    (Array items definition is not a renderable schema object)
+                 // Reduced indentation/padding
+                 <Typography variant="caption" color="text.secondary" sx={{ ml: 1.5, pl: 1, display: 'block', py: 0.25 }}>
+                    (Array items definition not renderable) {/* Shortened */}
                  </Typography>
            )}
         </Box>

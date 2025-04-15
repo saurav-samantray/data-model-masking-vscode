@@ -1,6 +1,6 @@
-// webview-ui/src/App.tsx
-import React, { useState, useCallback, useEffect, useRef } from 'react'; // Add useRef
-import { Schema, SelectionState, SelectionValue, SchemaPayload } from './types'; // Use local types
+// c:\workspace\apicurio\data-model-masking-vscode\webview-ui\src\App.tsx
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { Schema, SelectionState, SelectionValue, SchemaPayload } from './types';
 import SchemaNode from './components/SchemaNode';
 import OutputGenerator from './components/OutputGenerator';
 import './App.css';
@@ -34,15 +34,16 @@ const DEFAULT_OUTPUT_DIR = 'generated_schemas'; // Define default
 function App() {
   const [allSchemas, setAllSchemas] = useState<{ [id: string]: Schema } | null>(null);
   const [mainSchemaId, setMainSchemaId] = useState<string | null>(null);
+  const [mainSchemaFileName, setMainSchemaFileName] = useState<string | null>(null); // Keep this state
   const [mainSchemaBasePath, setMainSchemaBasePath] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
   const [selectionState, setSelectionState] = useState<SelectionState | undefined>(undefined);
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
   const [outputDir, setOutputDir] = useState<string>(DEFAULT_OUTPUT_DIR);
 
-  // Ref to track if initial state was just set, to prevent dataModelPayload from resetting it
   const initialStateJustSet = useRef(false);
 
+  // useEffect for message handling remains the same...
   useEffect(() => {
     const applyThemeToBody = (theme: 'light' | 'dark') => {
       document.body.classList.remove('light', 'dark');
@@ -63,18 +64,19 @@ function App() {
             if (payload && payload.schemas && payload.mainSchemaId) {
               setAllSchemas(payload.schemas);
               setMainSchemaId(payload.mainSchemaId);
+              // *** CHANGE: Ensure mainSchemaFileName is set from payload ***
+              setMainSchemaFileName(payload.mainSchemaId); // Use the ID from payload as filename context
               setMainSchemaBasePath(payload.mainSchemaBasePath || null);
               setError('');
 
-              // Reset selection/outputDir ONLY if we didn't just load initial state
               if (!initialStateJustSet.current) {
                  console.log("Resetting selection and outputDir for new payload.");
                  setSelectionState(undefined);
-                 setOutputDir(DEFAULT_OUTPUT_DIR);
+                 // *** CHANGE: Use mainSchemaBasePath for default outputDir if available ***
+                 setOutputDir(payload.mainSchemaBasePath || DEFAULT_OUTPUT_DIR);
               } else {
                  console.log("Skipping selection/outputDir reset after initial state load.");
               }
-              // Reset the flag after processing
               initialStateJustSet.current = false;
 
               console.log(`State updated: mainSchemaId=${payload.mainSchemaId}`);
@@ -82,6 +84,7 @@ function App() {
                console.warn("Received null or invalid dataModelPayload", payload);
                setAllSchemas(null);
                setMainSchemaId(null);
+               setMainSchemaFileName(null); // Clear filename
                setMainSchemaBasePath(null);
                setError('Received invalid schema data.');
                setSelectionState(undefined);
@@ -92,24 +95,23 @@ function App() {
              setError(`Error processing schema data: ${e instanceof Error ? e.message : String(e)}`);
              setAllSchemas(null);
              setMainSchemaId(null);
+             setMainSchemaFileName(null); // Clear filename
              setMainSchemaBasePath(null);
              setSelectionState(undefined);
              setOutputDir(DEFAULT_OUTPUT_DIR);
           }
           break;
 
-        // --- Handler for initial mask state ---
         case 'setInitialMaskState':
           if (message.selection) {
             console.log("Received initial mask state:", message);
             setSelectionState(message.selection);
-            // Set outputDir only if provided and valid, otherwise keep default
             if (typeof message.outputDir === 'string' && message.outputDir.trim() !== '') {
                 setOutputDir(message.outputDir);
             } else {
-                setOutputDir(DEFAULT_OUTPUT_DIR); // Fallback if not provided or empty
+                // If outputDir isn't in the mask state, try using the base path if available
+                setOutputDir(mainSchemaBasePath || DEFAULT_OUTPUT_DIR);
             }
-            // Set the flag to prevent dataModelPayload reset
             initialStateJustSet.current = true;
           } else {
             console.warn("Received setInitialMaskState message without valid selection data.");
@@ -125,11 +127,12 @@ function App() {
            console.log("Received clearState message");
            setAllSchemas(null);
            setMainSchemaId(null);
+           setMainSchemaFileName(null); // Clear filename
            setMainSchemaBasePath(null);
            setError('');
            setSelectionState(undefined);
            setOutputDir(DEFAULT_OUTPUT_DIR);
-           initialStateJustSet.current = false; // Reset flag on clear
+           initialStateJustSet.current = false;
            break;
         case 'setOutputDirectory':
             if (message.path && typeof message.path === 'string') {
@@ -148,7 +151,7 @@ function App() {
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, []); // Run only once on mount
+  }, [mainSchemaBasePath]); // Add mainSchemaBasePath dependency for default outputDir logic
 
   useEffect(() => {
       document.body.classList.remove('light', 'dark');
@@ -156,15 +159,25 @@ function App() {
   }, [themeMode]);
 
 
-  const handleCreateMask = useCallback((selectionPayload: string) => {
-    console.log(`App.tsx: handleCreateMask called with payload length: ${selectionPayload.length}`)
-    vscode.postMessage({ type: 'create-mask', content: selectionPayload });
-  }, []);
+  // *** CHANGE: Update handleCreateMask signature and implementation ***
+  const handleCreateMask = useCallback((payload: Record<string, any>) => {
+    console.log(`App.tsx: handleCreateMask called with payload:`, payload);
+    try {
+        const payloadString = JSON.stringify(payload);
+        vscode.postMessage({ type: 'create-mask', content: payloadString });
+    } catch (error) {
+        console.error("Error stringifying payload:", error);
+        setError(`Failed to prepare mask data: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, []); // Dependencies remain empty as it only uses vscode api
 
+  // handleToggle remains the same...
   const handleToggle = useCallback((path: (string | number)[], newValue: SelectionValue) => {
     setSelectionState(prevState => {
         try {
             const newState = setDeepValue(prevState, path, newValue);
+            // Persist state change immediately
+            vscode.setState({ selectionState: newState, outputDir });
             return newState;
         } catch (error) {
             console.error("[handleToggle] Error during setDeepValue:", error);
@@ -172,12 +185,17 @@ function App() {
             return prevState;
         }
     });
-  }, []);
+  }, [outputDir]); // Add outputDir dependency for setState
 
+  // handleOutputDirChange remains the same...
   const handleOutputDirChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setOutputDir(event.target.value);
+    const newOutputDir = event.target.value;
+    setOutputDir(newOutputDir);
+    // Persist state change immediately
+    vscode.setState({ selectionState, outputDir: newOutputDir });
   };
 
+  // handleBrowseClick remains the same...
   const handleBrowseClick = () => {
     vscode.postMessage({ type: 'selectOutputDirectory' });
   };
@@ -198,14 +216,14 @@ function App() {
 
         {mainSchema && mainSchemaId && allSchemas && (
           <Grid container spacing={2} direction="column" sx={{ flexGrow: 1, overflow: 'hidden', textAlign: 'left' }}>
-            {/* Top Section: Schema Tree + Output Controls */}
             <Grid item xs={12} sx={{ overflowY: 'auto', flexShrink: 1 }}>
                <Typography variant="h5" component="h2" gutterBottom>
-                   Mask Editor: {mainSchemaId} {/* Consider showing original name if inferred */}
+                   {/* *** CHANGE: Use mainSchemaFileName for display *** */}
+                   Mask Editor: {mainSchemaFileName || mainSchemaId}
                </Typography>
                <SchemaNode
                  schema={mainSchema}
-                 selection={selectionState} // Pass the potentially pre-filled state
+                 selection={selectionState}
                  onToggle={handleToggle}
                  path={[]}
                  isRoot={true}
@@ -214,13 +232,12 @@ function App() {
                  renderedAncestorIds={new Set([mainSchemaId])}
                />
 
-               {/* Output Directory Input and Browse Button */}
                <Box sx={{ my: 2, display: 'flex', alignItems: 'center' }}>
                  <TextField
                    label="Output Directory"
                    variant="outlined"
                    size="small"
-                   value={outputDir} // Use the potentially pre-filled state
+                   value={outputDir}
                    onChange={handleOutputDirChange}
                    placeholder={DEFAULT_OUTPUT_DIR}
                    sx={{ mr: 1, flexGrow: 1 }}
@@ -230,12 +247,12 @@ function App() {
                  </Button>
                </Box>
 
-               {/* Output Generator Component */}
                <OutputGenerator
-                 selectionState={selectionState} // Pass the potentially pre-filled state
-                 mainSchemaFileName={mainSchemaId}
+                 selectionState={selectionState}
+                 // *** CHANGE: Pass mainSchemaFileName ***
+                 mainSchemaFileName={mainSchemaFileName}
                  mainSchemaBasePath={mainSchemaBasePath}
-                 outputDir={outputDir || DEFAULT_OUTPUT_DIR} // Use the potentially pre-filled state
+                 outputDir={outputDir} // Pass current outputDir state
                  handleCreateMask={handleCreateMask}
                />
             </Grid>
@@ -247,3 +264,4 @@ function App() {
 }
 
 export default App;
+

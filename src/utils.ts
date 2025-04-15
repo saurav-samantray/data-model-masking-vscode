@@ -80,17 +80,22 @@ export function getOutputPath(
 
 /**
  * Writes the generated schema to a file, creating directories if needed.
+ * Uses the provided suffix to name the output file.
  */
-export function writeSchemaFile(filePath: string, schema: Schema): void {
-    const suffix = '.m1'; // Define the suffix to add
+// *** CHANGE: Add maskSuffix parameter ***
+export function writeSchemaFile(filePath: string, schema: Schema, maskSuffix: string): void {
+    // *** REMOVE: Hardcoded suffix ***
+    // const suffix = '.m1'; // Define the suffix to add
+
     try {
         // 1. Separate directory, base filename, and extension
         const dir = path.dirname(filePath);
         const ext = path.extname(filePath); // e.g., ".json"
         const baseName = path.basename(filePath, ext); // e.g., "schema"
 
-        // 2. Construct the new filename with the suffix
-        const newFileName = `${baseName}${suffix}${ext}`; // e.g., "schema_masked.json"
+        // 2. Construct the new filename with the provided suffix
+        // *** CHANGE: Use maskSuffix parameter ***
+        const newFileName = `${baseName}${maskSuffix}${ext}`; // e.g., "schema_mask_v2.json"
         const newFilePath = path.join(dir, newFileName); // Construct the full new path
 
         // 3. Ensure the directory exists (using the original directory path)
@@ -108,7 +113,8 @@ export function writeSchemaFile(filePath: string, schema: Schema): void {
     } catch (error: any) {
         // Log error with the intended original path for context, maybe? Or new path?
         // Let's use newFilePath as that's where the write failed.
-        const newFilePathForError = path.join(path.dirname(filePath), `${path.basename(filePath, path.extname(filePath))}${suffix}${path.extname(filePath)}`);
+        // *** CHANGE: Use maskSuffix parameter in error reporting if needed (though newFilePath is likely best) ***
+        const newFilePathForError = path.join(path.dirname(filePath), `${path.basename(filePath, path.extname(filePath))}${maskSuffix}${path.extname(filePath)}`);
         console.error(`Error writing masked schema file ${newFilePathForError}: ${error.message}`);
         throw error; // Re-throw to propagate the error
     }

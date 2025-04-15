@@ -40,6 +40,9 @@ export interface RootSelection {
 
   // Optional: Specify the output directory
   outputDir?: string;
+
+  // Optional: Specify the mask file suffix (for file naming)
+  maskSuffix?: string;
 }
 
 // Internal cache for processed schemas to avoid redundant work and handle circular refs (basic)
