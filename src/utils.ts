@@ -80,49 +80,56 @@ export function getOutputPath(
 
 /**
  * Writes the generated schema to a file, creating directories if needed.
- * Uses the provided suffix to name the output file.
+ * If maskFileNameBase, maskSuffix, and maskExtension are provided, it constructs
+ * the filename. Otherwise, it assumes filePath is the exact desired output path.
  */
-// *** CHANGE: Add maskSuffix parameter ***
-export function writeSchemaFile(filePath: string, schema: Schema,
-     maskFileNameBase: string | undefined, maskSuffix: string, maskExtension: string | undefined): void {
-    // *** REMOVE: Hardcoded suffix ***
-    // const suffix = '.m1'; // Define the suffix to add
+export function writeSchemaFile(
+    filePath: string, // Can be the original path OR the final desired output path
+    schema: Schema,
+    maskFileNameBase?: string | undefined, // Optional: Base name for constructing output filename
+    maskSuffix?: string, // Optional: Suffix for constructing output filename
+    maskExtension?: string | undefined // Optional: Extension for constructing output filename
+): void {
+    let finalFilePath: string;
+    let outputDir: string;
+
+    // If construction parameters are given, build the path
+    if (maskFileNameBase !== undefined && maskSuffix !== undefined && maskExtension !== undefined) {
+        const dir = path.dirname(filePath); // Use dir from the original path context
+        const ext = maskExtension || path.extname(filePath);
+        const baseName = maskFileNameBase || path.basename(filePath, ext);
+        const newFileName = `${baseName}${maskSuffix}${ext}`;
+        finalFilePath = path.join(dir, newFileName);
+        outputDir = dir;
+    }
+    // Otherwise, assume filePath is the final desired path
+    else {
+        finalFilePath = filePath;
+        outputDir = path.dirname(finalFilePath);
+    }
+
 
     try {
-        // 1. Separate directory, base filename, and extension
-        const dir = path.dirname(filePath);
-        const ext = maskExtension || path.extname(filePath); // e.g., ".json"
-        const baseName = maskFileNameBase || path.basename(filePath, ext); // e.g., "schema"
-
-        // 2. Construct the new filename with the provided suffix
-        // *** CHANGE: Use maskSuffix parameter ***
-        const newFileName = `${baseName}${maskSuffix}${ext}`; // e.g., "schema_mask_v2.json"
-        const newFilePath = path.join(dir, newFileName); // Construct the full new path
-
-        // 3. Ensure the directory exists (using the original directory path)
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
+        // Ensure the final output directory exists
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
         }
 
-        // 4. Stringify the schema content
+        // Stringify the schema content (detect format from final path extension)
         let content: string;
-        if (ext === '.yaml' || ext === '.yml') {
+        const finalExt = path.extname(finalFilePath).toLowerCase();
+        if (finalExt === '.yaml' || finalExt === '.yml') {
             content = jsYaml.dump(schema);
         } else {
-            content = JSON.stringify(schema, null, 2); // Pretty print JSON
+            content = JSON.stringify(schema, null, 2); // Default to JSON
         }
-        //const content = JSON.stringify(schema, null, 2);
 
-        // 5. Write the file using the NEW path
-        fs.writeFileSync(newFilePath, content, 'utf-8');
-        console.log(`Successfully wrote masked schema to: ${newFilePath}`); // Log the new path
+        // Write the file using the final path
+        fs.writeFileSync(finalFilePath, content, 'utf-8');
+        console.log(`Successfully wrote schema to: ${finalFilePath}`);
 
     } catch (error: any) {
-        // Log error with the intended original path for context, maybe? Or new path?
-        // Let's use newFilePath as that's where the write failed.
-        // *** CHANGE: Use maskSuffix parameter in error reporting if needed (though newFilePath is likely best) ***
-        const newFilePathForError = path.join(path.dirname(filePath), `${path.basename(filePath, path.extname(filePath))}${maskSuffix}${path.extname(filePath)}`);
-        console.error(`Error writing masked schema file ${newFilePathForError}: ${error.message}`);
+        console.error(`Error writing schema file ${finalFilePath}: ${error.message}`);
         throw error; // Re-throw to propagate the error
     }
 }
